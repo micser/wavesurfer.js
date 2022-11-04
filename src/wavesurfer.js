@@ -43,7 +43,8 @@ import MediaElementWebAudio from './mediaelement-webaudio';
  * `
  * @property {string} backgroundColor=null Change background color of the
  * waveform container.
- * @property {number} barHeight=1 The height of the wave bars.
+* @property {number} maxBufferSize=null Maximum size audio to handle. Over this size, a simple flat progress bar will be drawn, avoiding causing a crash on mobile browsers.
+* @property {number} barHeight=1 The height of the wave bars.
  * @property {number} barRadius=0 The radius of the wave bars. Makes bars rounded
  * @property {number} barGap=null The optional spacing between bars of the wave,
  * if not provided will be calculated in legacy format.
@@ -255,6 +256,7 @@ export default class WaveSurfer extends util.Observer {
         autoCenterImmediately: false,
         backend: 'WebAudio',
         backgroundColor: null,
+        maxBufferSize: null,
         barHeight: 1,
         barRadius: 0,
         barGap: null,
@@ -1326,6 +1328,43 @@ export default class WaveSurfer extends util.Observer {
         this.fireEvent('redraw', peaks, width);
     }
 
+
+    /**
+     * Render a fake wave form for audio that is too large to load
+     *
+     * @private
+     * @emits WaveSurfer#redraw
+     */
+    drawRandom() {
+        const nominalWidth = Math.round(
+            1000 *
+                this.params.minPxPerSec *
+                this.params.pixelRatio
+        );
+        const parentWidth = this.drawer.getWidth();
+        let width = nominalWidth;
+        // always start at 0 after zooming for scrolling : issue redraw left part
+        let start = 0;
+        let end = Math.max(start + parentWidth, width);
+        // Fill container
+        if (
+            this.params.fillParent &&
+            (!this.params.scrollParent || nominalWidth < parentWidth)
+        ) {
+            width = parentWidth;
+            start = 0;
+            end = width;
+        }
+
+        let peaks = [];
+        let i;
+        for (i = 0; i < width; i++) {
+            peaks.push(Math.random() / 2);
+        }
+        this.drawer.drawPeaks(peaks, width, start, end);
+        this.fireEvent('redraw', peaks, width);
+    }
+
     /**
      * Horizontally zooms the waveform in and out. It also changes the parameter
      * `minPxPerSec` and enables the `scrollParent` option. Calling the function
@@ -1359,11 +1398,25 @@ export default class WaveSurfer extends util.Observer {
      * @param {ArrayBuffer} arraybuffer Buffer to process
      */
     loadArrayBuffer(arraybuffer) {
-        this.decodeArrayBuffer(arraybuffer, data => {
-            if (!this.isDestroyed) {
-                this.loadDecodedBuffer(data);
+        if (this.params.maxBufferSize != null) {
+            if (arraybuffer.byteLength < this.params.maxBufferSize) {
+                this.decodeArrayBuffer(arraybuffer, data => {
+                    if (!this.isDestroyed) {
+                        this.loadDecodedBuffer(data);
+                    }
+                });
+            } else {
+                if (!this.isDestroyed) {
+                    this.drawRandom();
+                }
             }
-        });
+        } else {
+            this.decodeArrayBuffer(arraybuffer, data => {
+                if (!this.isDestroyed) {
+                    this.loadDecodedBuffer(data);
+                }
+            });
+        }
     }
 
     /**
