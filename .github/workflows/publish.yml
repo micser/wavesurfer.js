@@ -4,9 +4,6 @@ on:
   push:
     branches: [ master ]
 
-permissions:
-  contents: write
-
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
