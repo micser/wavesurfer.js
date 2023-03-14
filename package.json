@@ -1,6 +1,6 @@
 {
   "name": "wavesurfer.js",
-  "version": "6.5.0",
+  "version": "6.6.0",
   "description": "Interactive navigable audio visualization using Web Audio and Canvas",
   "main": "dist/wavesurfer.js",
   "directories": {
@@ -31,7 +31,8 @@
     "test": "karma start karma.conf.js",
     "test:chrome": "karma start karma.conf.js --browsers=Chrome --single-run=false",
     "prepublishOnly": "not-in-install && npm run build || in-install",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "release": "./scripts/release.sh"
   },
   "repository": {
     "type": "git",
