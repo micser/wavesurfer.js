@@ -1,6 +1,25 @@
 wavesurfer.js changelog
 =======================
 
+6.6.3 (04.04.2023)
+------------------
+- Markers plugin:
+  - allow removing markers by passing a marker object (#2749)
+  - add getMarkers function (#2743)
+- Docs: version the unpkg script in readme (#2746)
+- Refactor: remove scriptNode (#2706)
+
+6.6.2 (24.03.2023)
+------------------
+- Revert "Zoom optimisation for Waves and matching implementation for Spectrograms (#2646)"
+- Fix: avoid exit 1 in CI script (#2734)
+
+6.6.1 (18.03.2023)
+------------------
+- Fix: NPM publish in the CI job (#2727)
+  - Fix: avoid exit 1 in CI script (#2734)
+- Docs: add a video tutorial link to the readme (#2724)
+
 6.6.0 (14.03.2023)
 ------------------
 - Zoom optimisation for Waves and matching implementation for Spectrograms (#2646)

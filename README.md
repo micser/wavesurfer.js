@@ -8,7 +8,9 @@ Interactive navigable audio visualization using Web Audio and Canvas.
 
 [![Screenshot](https://raw.githubusercontent.com/wavesurfer-js/wavesurfer.js/gh-pages/example/screenshot.png "Screenshot")](https://wavesurfer-js.org)
 
-See a [tutorial](https://wavesurfer-js.org/docs) and [examples](https://wavesurfer-js.org/examples) on [wavesurfer-js.org](https://wavesurfer-js.org).
+See [docs](https://wavesurfer-js.org/docs) and [examples](https://wavesurfer-js.org/examples) on [wavesurfer-js.org](https://wavesurfer-js.org).
+
+For a video tutorial, watch this [series by Live Blogger on YouTube](https://www.youtube.com/watch?v=yCmnDWCF8m0). 📺
 
 ## Questions
 Have a question about integrating wavesurfer.js on your website? Feel free to ask in our forum: https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a
@@ -31,7 +33,7 @@ import WaveSurfer from 'wavesurfer.js'
 
 If you're not using a package manager, simply insert the script from a CDN:
 ```
-<script src="https://unpkg.com/wavesurfer.js"></script>
+<script src="https://unpkg.com/wavesurfer.js@6.6"></script>
 ```
 
 Create a container in your HTML:
