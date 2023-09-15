@@ -1,157 +1,188 @@
-# wavesurfer.js v6
+# <img src="https://user-images.githubusercontent.com/381895/226091100-f5567a28-7736-4d37-8f84-e08f297b7e1a.png" alt="logo" height="60" valign="middle" /> wavesurfer.js
 
-[![npm version](https://img.shields.io/npm/v/wavesurfer.js.svg?style=flat)](https://www.npmjs.com/package/wavesurfer.js)
-![npm](https://img.shields.io/npm/dm/wavesurfer.js.svg) [![Join the chat at https://gitter.im/wavesurfer-js/wavesurfer.js](https://badges.gitter.im/wavesurfer-js/wavesurfer.js.svg)](https://gitter.im/wavesurfer-js/wavesurfer.js?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-[![GitPOAP Badge](https://public-api.gitpoap.io/v1/repo/wavesurfer-js/wavesurfer.js/badge)](https://www.gitpoap.io/gh/wavesurfer-js/wavesurfer.js)
+[![npm](https://img.shields.io/npm/v/wavesurfer.js)](https://www.npmjs.com/package/wavesurfer.js)
 
-Interactive navigable audio visualization using Web Audio and Canvas.
+## New TypeScript version
 
-[![Screenshot](https://raw.githubusercontent.com/wavesurfer-js/wavesurfer.js/gh-pages/example/screenshot.png "Screenshot")](https://wavesurfer-js.org)
+wavesurfer.js v7 is a TypeScript rewrite of wavesurfer.js that brings several improvements:
 
-See [docs](https://wavesurfer-js.org/docs) and [examples](https://wavesurfer-js.org/examples) on [wavesurfer-js.org](https://wavesurfer-js.org).
+ * Typed API for better development experience
+ * Enhanced decoding and rendering performance
+ * New and improved plugins
 
-For a video tutorial, watch this [series by Live Blogger on YouTube](https://www.youtube.com/watch?v=yCmnDWCF8m0). 📺
+<img width="626" alt="waveform screenshot" src="https://github.com/katspaugh/wavesurfer.js/assets/381895/05f03bed-800e-4fa1-b09a-82a39a1c62ce">
 
-## Questions
-Have a question about integrating wavesurfer.js on your website? Feel free to ask in our forum: https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a
+## Getting started
 
-## Quick start
-Install the package:
+Install and import the package:
 
+```bash
+npm install --save wavesurfer.js
 ```
-npm install wavesurfer.js --save
-
-# or
-
-yarn add wavesurfer.js
-```
-
-And import it like so:
-```
+```js
 import WaveSurfer from 'wavesurfer.js'
 ```
 
-If you're not using a package manager, simply insert the script from a CDN:
-```
-<script src="https://unpkg.com/wavesurfer.js@6.6"></script>
-```
-
-Create a container in your HTML:
+Alternatively, insert a UMD script tag which exports the library as a global `WaveSurfer` variable:
 ```html
-<div id="waveform"></div>
+<script src="https://unpkg.com/wavesurfer.js@7"></script>
 ```
 
-Create an instance of wavesufer.js, passing the container selector and a few [options](https://wavesurfer-js.org/docs/options.html):
-
-```javascript
-var wavesurfer = WaveSurfer.create({
-    container: '#waveform',
-    waveColor: 'violet',
-    progressColor: 'purple'
-});
+Create a wavesurfer instance and pass various [options](#wavesurfer-options):
+```js
+const wavesurfer = WaveSurfer.create({
+  container: '#waveform',
+  waveColor: '#4F4A85',
+  progressColor: '#383351',
+  url: '/audio.mp3',
+})
 ```
 
-Subscribe to some [events](https://wavesurfer-js.org/docs/events.html):
-
-```javascript
-wavesurfer.on('ready', function () {
-    wavesurfer.play();
-});
+To import one of the plugins, e.g. the [Regions plugin](https://wavesurfer-js.org/examples/#regions.js):
+```js
+import Regions from 'wavesurfer.js/plugins/regions'
 ```
 
-Load an audio file from a URL:
-
-```javascript
-wavesurfer.load('example/media/demo.wav');
+Or as a script tag that will export `WaveSurfer.Regions`:
+```html
+<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
 ```
 
-## Documentation
+TypeScript types are included in the package, so there's no need to install `@types/wavesurfer.js`.
 
-See the documentation on all available [methods](https://wavesurfer-js.org/docs/methods.html), [options](https://wavesurfer-js.org/docs/options.html) and [events](https://wavesurfer-js.org/docs/events.html) on the [homepage](https://wavesurfer-js.org/docs/).
+See more [examples](https://wavesurfer-js.org/examples).
 
-## Projects using wavesurfer.js
+## API reference
 
-For the list of projects using wavesurfer.js, check out
-[the projects page](https://wavesurfer-js.org/projects/).
+See the wavesurfer.js documentation on our website:
 
-## Contributing
+ * [methods](https://wavesurfer-js.org/docs/classes/wavesurfer.default)
+ * [options](http://wavesurfer-js.org/docs/options)
+ * [events](http://wavesurfer-js.org/docs/events)
 
-Have an idea and want to contribute to wavesurfer.js?
-Please first start a discussion in the [Ideas section of our forum](https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/ideas) to coordinate with the maintainers.
+## Plugins
 
-### Development
+The "official" plugins have been completely rewritten and enhanced:
 
-[![Build Status](https://github.com/wavesurfer-js/wavesurfer.js/workflows/wavesurfer.js/badge.svg?branch=master)](https://github.com/wavesurfer-js/wavesurfer.js/actions?workflow=wavesurfer.js)
-[![Coverage Status](https://coveralls.io/repos/github/wavesurfer-js/wavesurfer.js/badge.svg)](https://coveralls.io/github/wavesurfer-js/wavesurfer.js)
-![Size](https://img.shields.io/bundlephobia/minzip/wavesurfer.js.svg?style=flat)
+ * [Regions](https://wavesurfer-js.org/examples/#regions.js) – visual overlays and markers for regions of audio
+ * [Timeline](https://wavesurfer-js.org/examples/#timeline.js) – displays notches and time labels below the waveform
+ * [Minimap](https://wavesurfer-js.org/examples/#minimap.js) – a small waveform that serves as a scrollbar for the main waveform
+ * [Envelope](https://wavesurfer-js.org/examples/#envelope.js) – a graphical interface to add fade-in and -out effects and control volume
+ * [Record](https://wavesurfer-js.org/examples/#record.js) – records audio from the microphone and renders a waveform
+ * [Spectrogram](https://wavesurfer-js.org/examples/#spectrogram.js) – visualization of an audio frequency spectrum (written by @akreal)
+ * [Hover](https://wavesurfer-js.org/examples/#hover.js) – shows a vertical line and timestmap on waveform hover
 
-Install development dependencies:
+## CSS styling
 
-```
-npm install
-```
-Development tasks automatically rebuild certain parts of the library when files are changed (`start` – wavesurfer, `start:plugins` – plugins). Start a dev task and go to `localhost:8080/example/` to test the current build.
+wavesurfer.js v7 is rendered into a Shadow DOM tree. This isolates its CSS from the rest of the web page.
+However, it's still possible to style various wavesurfer.js elements with CSS via the `::part()` pseudo-selector.
+For example:
 
-Start development server for core library:
-
-```
-npm run start
-```
-
-Start development server for plugins:
-
-```
-npm run start:plugins
-```
-
-Build all the files. (generated files are placed in the `dist` directory.)
-
-```
-npm run build
+```css
+#waveform ::part(cursor):before {
+  content: '🏄';
+}
+#waveform ::part(region) {
+  font-family: fantasy;
+}
 ```
 
-Running tests only:
+You can see which elements you can style in the DOM inspector – they will have a `part` attribute.
+See [this example](https://wavesurfer-js.org/examples/#styling.js) for play around with styling.
+
+## Upgrading from v6
+
+Most options, events, and methods are similar to those in previous versions.
+
+### Notable differences
+ * The `backend` option is removed – [HTML5 audio (or video) is the only playback mechanism](https://github.com/katspaugh/wavesurfer.js/discussions/2762#discussioncomment-5669347). However, you can still connect wavesurfer to Web Audio via `MediaElementSourceNode`. See this [example](https://wavesurfer-js.org/examples/#webaudio.js).
+ * The Markers plugin is removed – you should use the Regions plugin with just a `startTime`.
+ * No Microphone plugin – superseded by the new Record plugin with more features.
+ * The Cursor plugin is replaced by the Hover plugin.
+
+### Removed options
+ * `backend`, `audioContext`, `closeAudioContext`, `audioScriptProcessor` – there's no Web Audio backend, so no AudioContext
+ * `autoCenterImmediately` – `autoCenter` is now always immediate unless the audio is playing
+ * `backgroundColor`, `hideCursor` – this can be easily set via CSS
+ * `mediaType`, `mediaControls` – you should instead pass an entire media element in the `media` option. [Example](https://wavesurfer-js.org/examples/#video.js).
+ * `partialRender` – done by default
+ * `pixelRatio` – `window.devicePixelRatio` is used by default
+ * `renderer` – there's just one renderer for now, so no need for this option
+ * `responsive` – responsiveness is enabled by default
+ * `scrollParent` – the container will scroll if `minPxPerSec` is set to a higher value
+ * `skipLength` – there's no `skipForward` and `skipBackward` methods anymore
+ * `splitChannelsOptions` – you should now use `splitChannels` to pass the channel options. Pass `height: 0` to hide a channel. See [this example](https://wavesurfer-js.org/examples/#split-channels.js).
+ * `drawingContextAttributes`, `maxCanvasWidth`, `forceDecode` – removed to reduce code complexity
+ * `xhr` - please use `fetchParams` instead
+ * `barMinHeight` - the minimum bar height is now 1 pixel by default
+
+### Removed methods
+ * `getFilters`, `setFilter` – as there's no Web Audio "backend"
+ * `drawBuffer` – to redraw the waveform, use `setOptions` instead and pass new rendering options
+ * `cancelAjax` – you can pass an [AbortSignal](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal) in `fetchParams`
+ * `skipForward`, `skipBackward`, `setPlayEnd` – can be implemented using `setTime(time)`
+ * `exportPCM` is replaced with `exportPeaks` that returns arrays of floats
+ * `toggleMute` is now called `setMuted(true | false)`
+ * `setHeight`, `setWaveColor`, `setCursorColor`, etc. – use `setOptions` with the corresponding params instead. E.g., `wavesurfer.setOptions({ height: 300, waveColor: '#abc' })`
+
+See the complete [documentation of the new API](http://wavesurfer-js.org/docs).
+
+## Questions
+
+Have a question about integrating wavesurfer.js on your website? Feel free to ask in our [Discussions forum](https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a).
+
+### FAQ
+
+* **Q**: Does wavesurfer support large files?
+* **A**: Since wavesurfer decodes audio entirely in the browser using Web Audio, large clips may fail to decode due to memory constraints. We recommend using pre-decoded peaks for large files (see [this example](https://wavesurfer-js.org/examples/#predecoded.js)). You can use a tool like [bbc/audiowaveform](https://github.com/bbc/audiowaveform) to generate peaks.
+
+---
+
+* **Q**: What about streaming audio?
+* **A**: Streaming isn't supported because wavesurfer needs to download the entire audio file to decode and render it.
+
+---
+
+* **Q**: There is a mismatch between my audio and the waveform. How do I fix it?
+* **A**: If you're using a VBR (variable bit rate) audio file, there might be a mismatch between the audio and the waveform. This can be fixed by converting your file to CBR (constant bit rate). See [this issue](https://github.com/katspaugh/wavesurfer.js/issues/2890#issuecomment-1601067822) for details.
+
+
+## Development
+
+To get started with development, follow these steps:
+
+ 1. Install dev dependencies:
 
 ```
-npm run test
+yarn
 ```
 
-Build documentation with esdoc (generated files are placed in the `doc` directory.)
+ 2. Start the TypeScript compiler in watch mode and launch an HTTP server:
+
 ```
-npm run doc
-```
-
-If you want to use [the VS Code - Debugger for Chrome](https://github.com/Microsoft/vscode-chrome-debug), there is already a [launch.json](.vscode/launch.json) with a properly configured ``sourceMapPathOverrides`` for you.
-
-## Editing documentation
-The homepage and documentation files are maintained in the [`gh-pages` branch](https://github.com/wavesurfer-js/wavesurfer.js/tree/gh-pages). Contributions to the documentation are especially welcome.
-
-## Releasing a new version
-To release a new version and publish it to NPM, follow the steps below.
-
- Switch to the master branch and make sure it's up-to-date
- ```
- git checkout master
- git fetch --all; git reset --hard origin/master
+yarn start
 ```
 
-Run the release script:
+This command will open http://localhost:9090 in your browser with live reload, allowing you to see the changes as you develop.
+
+## Tests
+
+The tests are written in the Cypress framework. They are a mix of e2e and visual regression tests.
+
+To run the test suite locally, first build the project:
 ```
-yarn release
+yarn build
 ```
-This will update the version, generate a changelog, and push everything to a new branch called `release/X.X.X`.
 
-A browser window will open to create a PR from this new branch to the master branch. Once the PR is approved and merged, an automated workflow will kick in and publish a release both on GitHub and NPM.
+Then launch the tests:
+```
+yarn cypress
+```
 
-## Credits
+## Feedback
 
-The main maintainer: <img src="https://avatars.githubusercontent.com/u/305679" width="16" height="16" /> [Thijs Triemstra](https://github.com/thijstriemstra)
+We appreciate your feedback and contributions!
 
-Many thanks to [all the awesome contributors](https://github.com/wavesurfer-js/wavesurfer.js/contributors)!
+If you encounter any issues or have suggestions for improvements, please don't hesitate to post in our [forum](https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a).
 
-## License
-
-[![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
-
-This work is licensed under a
-[BSD 3-Clause License](https://opensource.org/licenses/BSD-3-Clause).
+We hope you enjoy using wavesurfer.js and look forward to hearing about your experiences with the library!
