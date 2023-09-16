@@ -496,7 +496,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     }
   }
 
-  renderRandom() {
+  renderDummyWaveform() {
     const audioCtx = new AudioContext();
     const dummyAudio = audioCtx.createBuffer(
       1,

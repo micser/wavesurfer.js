@@ -131,6 +131,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   private plugins: GenericPlugin[] = []
   private decodedData: AudioBuffer | null = null
   protected subscriptions: Array<() => void> = []
+  private renderDummy: boolean = false
 
   /** Create a new WaveSurfer instance */
   public static create(options: WaveSurferOptions) {
@@ -343,15 +344,14 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       this.decodedData = Decoder.createBuffer(channelData, duration)
     } else if (blob) {
       const arrayBuffer = await blob.arrayBuffer()
-      if (this.options.maxBufferSize) {
+      if (this.options.maxBufferSize != null) {
         if (arrayBuffer.byteLength < this.options.maxBufferSize) {
           this.decodedData = await Decoder.decode(arrayBuffer, this.options.sampleRate)
         } else {
-          let dummyArray = []
-          for (let i = 0; i < 1024; i++) {
-            dummyArray.push(Math.floor(Math.random() * 255));
-          }
+          this.renderDummy = true
         }
+      } else {
+        this.decodedData = await Decoder.decode(arrayBuffer, this.options.sampleRate)
       }
     }
 
@@ -360,8 +360,8 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     // Render the waveform
     if (this.decodedData) {
       this.renderer.render(this.decodedData)
-    } else {
-      this.renderer.renderRandom()
+    } else if (this.renderDummy) {
+      this.renderer.renderDummyWaveform()
     }
 
     this.emit('ready', this.getDuration())
