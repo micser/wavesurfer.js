@@ -259,6 +259,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     const topChannel = channelData[0]
     const bottomChannel = channelData[1] || channelData[0]
     const length = topChannel.length
+
     const { width, height } = ctx.canvas
     const halfHeight = height / 2
     const pixelRatio = window.devicePixelRatio || 1
@@ -277,6 +278,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     let maxBottom = 0
     for (let i = 0; i <= length; i++) {
       const x = Math.round(i * barIndexScale)
+
       if (x > prevX) {
         const topBarHeight = Math.round(maxTop * halfHeight * vScale)
         const bottomBarHeight = Math.round(maxBottom * halfHeight * vScale)
