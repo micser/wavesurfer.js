@@ -41,7 +41,17 @@ record.on('record-end', (blob) => {
     textContent: 'Download recording',
   })
 })
+const pauseButton = document.querySelector('#pause');
+pauseButton.onclick = () => {
+  if (record.isPaused()) {
+    record.resumeRecording()
+    pauseButton.textContent = 'Pause'
+    return
+  }
 
+  record.pauseRecording();
+  pauseButton.textContent = 'Resume'
+}
 {
   // Record button
   const recButton = document.querySelector('#record')
@@ -50,6 +60,7 @@ record.on('record-end', (blob) => {
     if (record.isRecording()) {
       record.stopRecording()
       recButton.textContent = 'Record'
+      pauseButton.style.display = 'none';
       return
     }
 
@@ -58,6 +69,7 @@ record.on('record-end', (blob) => {
     record.startRecording().then(() => {
       recButton.textContent = 'Stop'
       recButton.disabled = false
+      pauseButton.style.display = 'inline';
     })
   }
 }
@@ -67,10 +79,11 @@ record.on('record-end', (blob) => {
   <h1 style="margin-top: 0">Press Record to start recording 🎙️</h1>
 
   <p>
-    📖 <a href="https://wavesurfer-js.org/docs/classes/plugins_record.RecordPlugin">Record plugin docs</a>
+    📖 <a href="https://wavesurfer.xyz/docs/classes/plugins_record.RecordPlugin">Record plugin docs</a>
   </p>
 
   <button id="record">Record</button>
+  <button id="pause" style="display: none;">Pause</button>
 
   <div id="mic" style="border: 1px solid #ddd; border-radius: 4px; margin-top: 1rem"></div>
 
