@@ -1,9 +1,9 @@
 {
   "name": "wavesurfer.js",
-  "version": "7.3.6",
+  "version": "7.7.8",
   "license": "BSD-3-Clause",
   "author": "katspaugh",
-  "description": "Navigable audio waveform player",
+  "description": "Audio waveform player",
   "homepage": "https://wavesurfer.xyz",
   "keywords": [
     "waveform",
@@ -15,7 +15,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git@github.com:wavesurfer-js/wavesurfer.js.git"
+    "url": "git@github.com:katspaugh/wavesurfer.js.git"
   },
   "type": "module",
   "files": [
@@ -28,22 +28,27 @@
   "types": "./dist/wavesurfer.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/wavesurfer.js",
+      "import": "./dist/wavesurfer.esm.js",
       "types": "./dist/wavesurfer.d.ts",
       "require": "./dist/wavesurfer.cjs"
     },
     "./dist/plugins/*.js": {
-      "import": "./dist/plugins/*.js",
+      "import": "./dist/plugins/*.esm.js",
       "types": "./dist/plugins/*.d.ts",
       "require": "./dist/plugins/*.cjs"
     },
     "./plugins/*": {
-      "import": "./dist/plugins/*.js",
+      "import": "./dist/plugins/*.esm.js",
       "types": "./dist/plugins/*.d.ts",
       "require": "./dist/plugins/*.cjs"
     },
     "./dist/*": {
       "import": "./dist/*"
+    },
+    "./dist/plugins/*.esm.js": {
+      "import": "./dist/plugins/*.esm.js",
+      "types": "./dist/plugins/*.d.ts",
+      "require": "./dist/plugins/*.cjs"
     }
   },
   "scripts": {
@@ -55,8 +60,8 @@
     "make-plugin": "./scripts/plugin.sh",
     "cypress": "cypress open --e2e",
     "cypress:canary": "cypress open --e2e -b chrome:canary",
-    "test": "cypress run",
-    "serve": "npx live-server --port=9090 --no-browser",
+    "test": "cypress run --browser chrome",
+    "serve": "npx live-server --port=9090 --no-browser --ignore='.*,src,cypress,scripts'",
     "start": "npm run build:dev & npm run serve"
   },
   "devDependencies": {
@@ -64,13 +69,17 @@
     "@rollup/plugin-typescript": "^11.1.2",
     "@typescript-eslint/eslint-plugin": "^5.57.0",
     "@typescript-eslint/parser": "^5.57.0",
-    "cypress": "^12.17.3",
+    "cypress": "^12.17.4",
     "cypress-image-snapshot": "^4.0.1",
     "eslint": "^8.37.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-prettier": "^4.2.1",
     "prettier": "^2.8.7",
     "rollup": "^3.26.2",
+    "rollup-plugin-dts": "^6.1.0",
     "typescript": "^5.0.4"
+  },
+  "dependencies": {
+    "wavesurfer.js": "^7.7.8"
   }
 }

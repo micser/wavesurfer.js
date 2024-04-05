@@ -1,12 +1,14 @@
 // All wavesurfer options in one place
 
-import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
+import WaveSurfer from 'wavesurfer.js'
 
 const options = {
   /** HTML element or CSS selector (required) */
   container: 'body',
   /** The height of the waveform in pixels */
   height: 128,
+  /** The width of the waveform in pixels or any CSS value; defaults to 100% */
+  width: 300,
   /** Render each audio channel as a separate waveform */
   splitChannels: false,
   /** Stretch the waveform to the full height */
@@ -67,6 +69,12 @@ const schema = {
     value: 128,
     min: 10,
     max: 512,
+    step: 1,
+  },
+  width: {
+    value: 300,
+    min: 10,
+    max: 2000,
     step: 1,
   },
   cursorWidth: {

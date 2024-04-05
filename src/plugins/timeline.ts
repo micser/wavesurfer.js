@@ -3,6 +3,7 @@
  */
 
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
+import createElement from '../dom.js'
 
 export type TimelinePluginOptions = {
   /** The height of the timeline in pixels, defaults to 20 */
@@ -27,6 +28,8 @@ export type TimelinePluginOptions = {
   style?: Partial<CSSStyleDeclaration> | string
   /** Turn the time into a suitable label for the time. */
   formatTimeCallback?: (seconds: number) => string
+  /** Opacity of the secondary labels, defaults to 0.25 */
+  secondaryLabelOpacity?: number
 }
 
 const defaultOptions = {
@@ -87,14 +90,10 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
       container.appendChild(this.timelineWrapper)
     }
 
-    if (this.options.duration) {
-      this.initTimeline(this.options.duration)
-    } else {
-      this.subscriptions.push(
-        this.wavesurfer.on('redraw', () => {
-          this.initTimeline(this.wavesurfer?.getDuration() || 0)
-        }),
-      )
+    this.subscriptions.push(this.wavesurfer.on('redraw', () => this.initTimeline()))
+
+    if (this.wavesurfer?.getDuration() || this.options.duration) {
+      this.initTimeline()
     }
   }
 
@@ -105,9 +104,10 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
   }
 
   private initTimelineWrapper(): HTMLElement {
-    const div = document.createElement('div')
-    div.setAttribute('part', 'timeline')
-    return div
+    return createElement('div', {
+      part: 'timeline-wrapper',
+      style: { pointerEvents: 'none', height: `${this.options.height}px` },
+    })
   }
 
   // Return how many seconds should be between each notch
@@ -146,7 +146,8 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
     return 2
   }
 
-  private initTimeline(duration: number) {
+  private initTimeline() {
+    const duration = this.wavesurfer?.getDuration() ?? this.options.duration ?? 0
     const pxPerSec = this.timelineWrapper.scrollWidth / duration
     const timeInterval = this.options.timeInterval ?? this.defaultTimeInterval(pxPerSec)
     const primaryLabelInterval = this.options.primaryLabelInterval ?? this.defaultPrimaryLabelInterval(pxPerSec)
@@ -155,28 +156,27 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
     const secondaryLabelSpacing = this.options.secondaryLabelSpacing
     const isTop = this.options.insertPosition === 'beforebegin'
 
-    const timeline = document.createElement('div')
-    timeline.setAttribute(
-      'style',
-      `
-      height: ${this.options.height}px;
-      overflow: hidden;
-      font-size: ${this.options.height / 2}px;
-      white-space: nowrap;
-      position: relative;
-    `,
-    )
+    const timeline = createElement('div', {
+      style: {
+        height: `${this.options.height}px`,
+        overflow: 'hidden',
+        fontSize: `${this.options.height / 2}px`,
+        whiteSpace: 'nowrap',
+        ...(isTop
+          ? {
+              position: 'absolute',
+              top: '0',
+              left: '0',
+              right: '0',
+              zIndex: '2',
+            }
+          : {
+              position: 'relative',
+            }),
+      },
+    })
 
-    if (isTop) {
-      const topStyle = `
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 2;
-      `
-      timeline.setAttribute('style', timeline.getAttribute('style') + topStyle)
-    }
+    timeline.setAttribute('part', 'timeline')
 
     if (typeof this.options.style === 'string') {
       timeline.setAttribute('style', timeline.getAttribute('style') + this.options.style)
@@ -184,24 +184,22 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
       Object.assign(timeline.style, this.options.style)
     }
 
-    const notchEl = document.createElement('div')
-    notchEl.setAttribute('part', 'timeline-notch')
-    notchEl.setAttribute(
-      'style',
-      `
-      width: 0;
-      height: 50%;
-      display: flex;
-      flex-direction: column;
-      justify-content: ${isTop ? 'flex-start' : 'flex-end'};
-      ${isTop ? 'top: 0;' : 'bottom: 0;'}
-      overflow: visible;
-      border-left: 1px solid currentColor;
-      opacity: 0.25;
-      position: absolute;
-      z-index: 1;
-    `,
-    )
+    const notchEl = createElement('div', {
+      style: {
+        width: '0',
+        height: '50%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: isTop ? 'flex-start' : 'flex-end',
+        top: isTop ? '0' : 'auto',
+        bottom: isTop ? 'auto' : '0',
+        overflow: 'visible',
+        borderLeft: '1px solid currentColor',
+        opacity: `${this.options.secondaryLabelOpacity ?? 0.25}`,
+        position: 'absolute',
+        zIndex: '1',
+      },
+    })
 
     for (let i = 0, notches = 0; i < duration; i += timeInterval, notches++) {
       const notch = notchEl.cloneNode() as HTMLElement
@@ -218,6 +216,9 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
         notch.textContent = this.options.formatTimeCallback(i)
         if (isPrimary) notch.style.opacity = '1'
       }
+
+      const mode = isPrimary ? 'primary' : isSecondary ? 'secondary' : 'tick'
+      notch.setAttribute('part', `timeline-notch timeline-notch-${mode}`)
 
       notch.style.left = `${i * pxPerSec}px`
       timeline.appendChild(notch)

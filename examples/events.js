@@ -1,4 +1,4 @@
-import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
+import WaveSurfer from 'wavesurfer.js'
 
 const wavesurfer = WaveSurfer.create({
   container: document.body,
@@ -26,9 +26,14 @@ wavesurfer.on('ready', (duration) => {
   console.log('Ready', duration + 's')
 })
 
-/** When a waveform is drawn */
-wavesurfer.on('redraw', () => {
-  console.log('Redraw')
+/** When visible waveform is drawn */
+wavesurfer.on('redrawcomplete', () => {
+  console.log('Redraw began')
+})
+
+/** When all audio channel chunks of the waveform have drawn */
+wavesurfer.on('redrawcomplete', () => {
+  console.log('Redraw complete')
 })
 
 /** When the audio starts playing */

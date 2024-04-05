@@ -1,6 +1,7 @@
 import glob from 'glob'
 import typescript from '@rollup/plugin-typescript'
 import terser from '@rollup/plugin-terser'
+import dts from 'rollup-plugin-dts'
 
 const plugins = [typescript(), terser()]
 
@@ -12,7 +13,7 @@ export default [
       file: 'dist/wavesurfer.esm.js',
       format: 'esm',
     },
-    plugins: [typescript(), terser()],
+    plugins,
   },
   // CommonJS module (Node.js)
   {
@@ -34,6 +35,13 @@ export default [
       exports: 'default',
     },
     plugins,
+  },
+
+  // Compiled type definitions
+  {
+    input: './dist/wavesurfer.d.ts',
+    output: [{ file: 'dist/types.d.ts', format: 'es' }],
+    plugins: [dts()],
   },
 
   // Wavesurfer plugins

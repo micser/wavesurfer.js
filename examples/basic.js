@@ -1,6 +1,6 @@
-// A super-basic example
+// A basic example
 
-import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
+import WaveSurfer from 'wavesurfer.js'
 
 const wavesurfer = WaveSurfer.create({
   container: document.body,
@@ -9,6 +9,6 @@ const wavesurfer = WaveSurfer.create({
   url: '/examples/audio/audio.wav',
 })
 
-wavesurfer.once('interaction', () => {
+wavesurfer.on('click', () => {
   wavesurfer.play()
 })

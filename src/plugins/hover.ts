@@ -3,6 +3,7 @@
  */
 
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
+import createElement from '../dom.js'
 
 export type HoverPluginOptions = {
   lineColor?: string
@@ -32,9 +33,8 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     this.options = Object.assign({}, defaultOptions, options)
 
     // Create the plugin elements
-    this.wrapper = document.createElement('div')
-    this.label = document.createElement('span')
-    this.wrapper.appendChild(this.label)
+    this.wrapper = createElement('div', { part: 'hover' })
+    this.label = createElement('span', { part: 'hover-label' }, this.wrapper)
   }
 
   public static create(options?: HoverPluginOptions) {
@@ -56,7 +56,6 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     const lineColor = this.options.lineColor || wsOptions.cursorColor || wsOptions.progressColor
 
     // Vertical line
-    this.wrapper.setAttribute('part', 'hover')
     Object.assign(this.wrapper.style, {
       position: 'absolute',
       zIndex: 10,
@@ -70,7 +69,6 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     })
 
     // Timestamp label
-    this.label.setAttribute('part', 'hover-label')
     Object.assign(this.label.style, {
       display: 'block',
       backgroundColor: this.options.labelBackground,
@@ -87,9 +85,11 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     // Attach pointer events
     container.addEventListener('pointermove', this.onPointerMove)
     container.addEventListener('pointerleave', this.onPointerLeave)
+    container.addEventListener('wheel', this.onPointerMove)
     this.unsubscribe = () => {
       container.removeEventListener('pointermove', this.onPointerMove)
       container.removeEventListener('pointerleave', this.onPointerLeave)
+      container.removeEventListener('wheel', this.onPointerLeave)
     }
   }
 
@@ -100,7 +100,7 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     return `${minutes}:${paddedSeconds}`
   }
 
-  private onPointerMove = (e: PointerEvent) => {
+  private onPointerMove = (e: PointerEvent | WheelEvent) => {
     if (!this.wavesurfer) return
 
     // Position

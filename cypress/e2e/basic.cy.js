@@ -25,6 +25,25 @@ describe('WaveSurfer basic tests', () => {
     cy.window().its('wavesurfer').should('be.an', 'object')
   })
 
+  it('should emit a redrawcomplete event', () => {
+    cy.window().then((win) => {
+      const { wavesurfer } = win
+      expect(wavesurfer.getDuration().toFixed(2)).to.equal('21.77')
+
+      wavesurfer.options.minPxPerSec = 200
+      wavesurfer.load('../../examples/audio/audio.wav')
+
+      return new Promise((resolve) => {
+        wavesurfer.once('redrawcomplete', () => {
+          wavesurfer.zoom(100)
+          wavesurfer.once('redrawcomplete', () => {
+            resolve()
+          })
+        })
+      })
+    })
+  })
+
   it('should load an audio file without errors', () => {
     cy.window().then((win) => {
       expect(win.wavesurfer.getDuration().toFixed(2)).to.equal('21.77')
@@ -36,6 +55,14 @@ describe('WaveSurfer basic tests', () => {
           expect(win.wavesurfer.getDuration().toFixed(2)).to.equal('26.39')
           resolve()
         })
+      })
+    })
+  })
+
+  it('should catch fetch errors', () => {
+    cy.window().then((win) => {
+      return win.wavesurfer.load('../../examples/audio/audio.w1av').catch((e) => {
+        expect(e.message).to.equal('Failed to fetch ../../examples/audio/audio.w1av: 404 (Not Found)')
       })
     })
   })
@@ -116,6 +143,23 @@ describe('WaveSurfer basic tests', () => {
     })
   })
 
+  it('should scroll on setScrollTime if zoomed in', () => {
+    cy.window().then((win) => {
+      win.wavesurfer.zoom(300)
+      const zoomedWidth = win.wavesurfer.getWrapper().clientWidth
+      win.wavesurfer.zoom(600)
+      const newWidth = win.wavesurfer.getWrapper().clientWidth
+
+      expect(Math.round(newWidth / zoomedWidth)).to.equal(2)
+
+      win.wavesurfer.setScrollTime(20)
+
+      cy.wait(1000).then(() => {
+        expect(win.wavesurfer.getScroll()).to.be.greaterThan(100)
+      })
+    })
+  })
+
   it('should export decoded audio data', () => {
     cy.window().then((win) => {
       const data = win.wavesurfer.getDecodedData()
@@ -171,18 +215,121 @@ describe('WaveSurfer basic tests', () => {
     })
   })
 
+  describe('exportImage', () => {
+    it('should export an image as a data-URI', () => {
+      cy.window()
+        .then((win) => {
+          return win.wavesurfer.exportImage()
+        })
+        .then((data) => {
+          expect(data[0]).to.match(/^data:image\/png;base64,/)
+        })
+    })
+
+    it('should export an image as a JPEG data-URI', () => {
+      cy.window()
+        .then((win) => {
+          return win.wavesurfer.exportImage('image/jpeg', 0.75)
+        })
+        .then((data) => {
+          expect(data[0]).to.match(/^data:image\/jpeg;base64,/)
+        })
+    })
+
+    it('should export an image as a blob', () => {
+      cy.window()
+        .then((win) => {
+          return win.wavesurfer.exportImage('image/webp', 0.75, 'blob')
+        })
+        .then((data) => {
+          expect(data[0]).to.be.a('blob')
+        })
+    })
+  })
+
   it('should destroy wavesurfer', () => {
     cy.window().then((win) => {
       win.wavesurfer.destroy()
     })
   })
 
-  it('should set media without errors', () => {
+  describe('setMediaElement', () => {
+    // Mock add/remove event listeners for `media` elements
+    const attachMockListeners = (el) => {
+      el.eventCount = 0
+
+      const addEventListener = el.addEventListener
+      el.addEventListener = (eventName, callback, options) => {
+        if (!options || !options.once) el.eventCount++
+        addEventListener.call(el, eventName, callback, options)
+      }
+      const removeEventListener = el.removeEventListener
+      el.removeEventListener = (eventName, callback) => {
+        el.eventCount--
+        removeEventListener.call(el, eventName, callback)
+      }
+    }
+
+    beforeEach((done) => {
+      cy.window().then((win) => {
+        win.wavesurfer.destroy()
+
+        const originalMedia = document.createElement('audio')
+        attachMockListeners(originalMedia)
+
+        win.wavesurfer = win.WaveSurfer.create({
+          container: '#waveform',
+          url: '../../examples/audio/demo.wav',
+          media: originalMedia,
+        })
+
+        win.wavesurfer.once('ready', () => done())
+      })
+    })
+
+    it('should set media without errors', () => {
+      cy.window().then((win) => {
+        const media = document.createElement('audio')
+        media.id = 'new-media'
+        win.wavesurfer.setMediaElement(media)
+        expect(win.wavesurfer.getMediaElement().id).to.equal('new-media')
+      })
+    })
+
+    it('should unsubscribe events from removed media element', () => {
+      cy.window().then((win) => {
+        const originalMedia = win.wavesurfer.getMediaElement()
+        const media = document.createElement('audio')
+
+        expect(originalMedia.eventCount).to.be.greaterThan(0)
+
+        win.wavesurfer.setMediaElement(media)
+        expect(originalMedia.eventCount).to.equal(0)
+      })
+    })
+
+    it('should subscribe events for newly set media element', () => {
+      cy.window().then((win) => {
+        const newMedia = document.createElement('audio')
+        attachMockListeners(newMedia)
+
+        win.wavesurfer.setMediaElement(newMedia)
+        expect(newMedia.eventCount).to.be.greaterThan(0)
+      })
+    })
+  })
+
+  it('should return true when calling isPlaying() after play()', (done) => {
     cy.window().then((win) => {
-      const media = document.createElement('audio')
-      media.id = 'new-media'
-      win.wavesurfer.setMediaElement(media)
-      expect(win.wavesurfer.getMediaElement().id).to.equal('new-media')
+      expect(win.wavesurfer.isPlaying()).to.be.false
+      win.wavesurfer.play()
+      expect(win.wavesurfer.isPlaying()).to.be.true
+      win.wavesurfer.once('play', () => {
+        expect(win.wavesurfer.isPlaying()).to.be.true
+        win.wavesurfer.pause()
+        expect(win.wavesurfer.isPlaying()).to.be.false
+        done()
+      })
     })
   })
 })

@@ -5,6 +5,7 @@
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
 import { makeDraggable } from '../draggable.js'
 import EventEmitter from '../event-emitter.js'
+import createElement from '../dom.js'
 
 export type EnvelopePoint = {
   id?: string
@@ -54,10 +55,12 @@ class Polyline extends EventEmitter<{
       circle: SVGEllipseElement
     }
   >
+  private subscriptions: (() => void)[] = []
 
   constructor(options: Options, wrapper: HTMLElement) {
     super()
 
+    this.subscriptions = []
     this.options = options
     this.polyPoints = new Map()
 
@@ -65,44 +68,66 @@ class Polyline extends EventEmitter<{
     const height = wrapper.clientHeight
 
     // SVG element
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('width', '100%')
-    svg.setAttribute('height', '100%')
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
-    svg.setAttribute('preserveAspectRatio', 'none')
-    svg.setAttribute('style', 'position: absolute; left: 0; top: 0; z-index: 4;')
-    svg.setAttribute('part', 'envelope')
+    const svg = createElement(
+      'svg',
+      {
+        xmlns: 'http://www.w3.org/2000/svg',
+        width: '100%',
+        height: '100%',
+        viewBox: `0 0 ${width} ${height}`,
+        preserveAspectRatio: 'none',
+        style: {
+          position: 'absolute',
+          left: '0',
+          top: '0',
+          zIndex: '4',
+        },
+        part: 'envelope',
+      },
+      wrapper,
+    ) as SVGSVGElement
+
     this.svg = svg
 
     // A polyline representing the envelope
-    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline')
-    polyline.setAttribute('points', `0,${height} ${width},${height}`)
-    polyline.setAttribute('stroke', options.lineColor)
-    polyline.setAttribute('stroke-width', options.lineWidth)
-    polyline.setAttribute('fill', 'none')
-    polyline.setAttribute('part', 'polyline')
-    polyline.setAttribute('style', options.dragLine ? 'cursor: row-resize; pointer-events: stroke;' : '')
-    svg.appendChild(polyline)
-
-    wrapper.appendChild(svg)
+    const polyline = createElement(
+      'polyline',
+      {
+        xmlns: 'http://www.w3.org/2000/svg',
+        points: `0,${height} ${width},${height}`,
+        stroke: options.lineColor,
+        'stroke-width': options.lineWidth,
+        fill: 'none',
+        part: 'polyline',
+        style: options.dragLine
+          ? {
+              cursor: 'row-resize',
+              pointerEvents: 'stroke',
+            }
+          : {},
+      },
+      svg,
+    ) as SVGPolylineElement
 
     // Make the polyline draggable along the Y axis
     if (options.dragLine) {
-      makeDraggable(polyline as unknown as HTMLElement, (_, dy) => {
-        const { height } = svg.viewBox.baseVal
-        const { points } = polyline
-        for (let i = 1; i < points.numberOfItems - 1; i++) {
-          const point = points.getItem(i)
-          point.y = Math.min(height, Math.max(0, point.y + dy))
-        }
-        const circles = svg.querySelectorAll('ellipse')
-        Array.from(circles).forEach((circle) => {
-          const newY = Math.min(height, Math.max(0, Number(circle.getAttribute('cy')) + dy))
-          circle.setAttribute('cy', newY.toString())
-        })
+      this.subscriptions.push(
+        makeDraggable(polyline as unknown as HTMLElement, (_, dy) => {
+          const { height } = svg.viewBox.baseVal
+          const { points } = polyline
+          for (let i = 1; i < points.numberOfItems - 1; i++) {
+            const point = points.getItem(i)
+            point.y = Math.min(height, Math.max(0, point.y + dy))
+          }
+          const circles = svg.querySelectorAll('ellipse')
+          Array.from(circles).forEach((circle) => {
+            const newY = Math.min(height, Math.max(0, Number(circle.getAttribute('cy')) + dy))
+            circle.setAttribute('cy', newY.toString())
+          })
 
-        this.emit('line-move', dy / height)
-      })
+          this.emit('line-move', dy / height)
+        }),
+      )
     }
 
     // Listen to double click to add a new point
@@ -140,31 +165,39 @@ class Polyline extends EventEmitter<{
   }
 
   private makeDraggable(draggable: SVGElement, onDrag: (x: number, y: number) => void) {
-    makeDraggable(
-      draggable as unknown as HTMLElement,
-      onDrag,
-      () => (draggable.style.cursor = 'grabbing'),
-      () => (draggable.style.cursor = 'grab'),
+    this.subscriptions.push(
+      makeDraggable(
+        draggable as unknown as HTMLElement,
+        onDrag,
+        () => (draggable.style.cursor = 'grabbing'),
+        () => (draggable.style.cursor = 'grab'),
+        1,
+      ),
     )
   }
 
   private createCircle(x: number, y: number) {
-    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse')
     const size = this.options.dragPointSize
     const radius = size / 2
-    circle.setAttribute('rx', radius.toString())
-    circle.setAttribute('ry', radius.toString())
-    circle.setAttribute('fill', this.options.dragPointFill)
-    if (this.options.dragPointStroke) {
-      circle.setAttribute('stroke', this.options.dragPointStroke)
-      circle.setAttribute('stroke-width', '2')
-    }
-    circle.setAttribute('style', 'cursor: grab; pointer-events: all;')
-    circle.setAttribute('part', 'envelope-circle')
-    circle.setAttribute('cx', x.toString())
-    circle.setAttribute('cy', y.toString())
-    this.svg.appendChild(circle)
-    return circle
+    return createElement(
+      'ellipse',
+      {
+        xmlns: 'http://www.w3.org/2000/svg',
+        cx: x,
+        cy: y,
+        rx: radius,
+        ry: radius,
+        fill: this.options.dragPointFill,
+        stroke: this.options.dragPointStroke,
+        'stroke-width': '2',
+        style: {
+          cursor: 'grab',
+          pointerEvents: 'all',
+        },
+        part: 'envelope-circle',
+      },
+      this.svg,
+    ) as SVGEllipseElement
   }
 
   removePolyPoint(point: EnvelopePoint) {
@@ -240,6 +273,7 @@ class Polyline extends EventEmitter<{
   }
 
   destroy() {
+    this.subscriptions.forEach((unsubscribe) => unsubscribe())
     this.polyPoints.clear()
     this.svg.remove()
   }

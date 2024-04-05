@@ -31,25 +31,25 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
     }
     // Speed
     if (options.playbackRate != null) {
-      this.onceMediaEvent('canplay', () => {
-        if (options.playbackRate != null) {
-          this.media.playbackRate = options.playbackRate
-        }
-      })
+      this.onMediaEvent(
+        'canplay',
+        () => {
+          if (options.playbackRate != null) {
+            this.media.playbackRate = options.playbackRate
+          }
+        },
+        { once: true },
+      )
     }
   }
 
-  protected onMediaEvent(
-    event: keyof HTMLMediaElementEventMap,
-    callback: () => void,
-    options?: AddEventListenerOptions,
+  protected onMediaEvent<K extends keyof HTMLElementEventMap>(
+    event: K,
+    callback: (ev: HTMLElementEventMap[K]) => void,
+    options?: boolean | AddEventListenerOptions,
   ): () => void {
     this.media.addEventListener(event, callback, options)
-    return () => this.media.removeEventListener(event, callback)
-  }
-
-  protected onceMediaEvent(event: keyof HTMLMediaElementEventMap, callback: () => void): () => void {
-    return this.onMediaEvent(event, callback, { once: true })
+    return () => this.media.removeEventListener(event, callback, options)
   }
 
   protected getSrc() {
@@ -63,13 +63,16 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
     }
   }
 
+  private canPlayType(type: string): boolean {
+    return this.media.canPlayType(type) !== ''
+  }
+
   protected setSrc(url: string, blob?: Blob) {
     const src = this.getSrc()
     if (src === url) return
     this.revokeSrc()
-    const newSrc = blob instanceof Blob ? URL.createObjectURL(blob) : url
+    const newSrc = blob instanceof Blob && this.canPlayType(blob.type) ? URL.createObjectURL(blob) : url
     this.media.src = newSrc
-    this.media.load()
   }
 
   protected destroy() {
@@ -83,8 +86,12 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
     this.media.load()
   }
 
+  protected setMediaElement(element: HTMLMediaElement) {
+    this.media = element
+  }
+
   /** Start playing the audio */
-  public play(): Promise<void> {
+  public async play(): Promise<void> {
     return this.media.play()
   }
 
@@ -95,10 +102,10 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
 
   /** Check if the audio is playing */
   public isPlaying(): boolean {
-    return this.media.currentTime > 0 && !this.media.paused && !this.media.ended
+    return !this.media.paused && !this.media.ended
   }
 
-  /** Jumpt to a specific time in the audio (in seconds) */
+  /** Jump to a specific time in the audio (in seconds) */
   public setTime(time: number) {
     this.media.currentTime = time
   }
@@ -138,6 +145,11 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
     return this.media.playbackRate
   }
 
+  /** Check if the audio is seeking */
+  public isSeeking(): boolean {
+    return this.media.seeking
+  }
+
   /** Set the playback speed, pass an optional false to NOT preserve the pitch */
   public setPlaybackRate(rate: number, preservePitch?: boolean) {
     // preservePitch is true by default in most browsers
@@ -150,11 +162,6 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
   /** Get the HTML media element */
   public getMediaElement(): HTMLMediaElement {
     return this.media
-  }
-
-  /** Set HTML media element */
-  public setMediaElement(element: HTMLMediaElement) {
-    this.media = element
   }
 
   /** Set a sink id to change the audio output device */

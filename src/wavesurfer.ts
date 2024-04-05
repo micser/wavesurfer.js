@@ -1,15 +1,19 @@
-import type { GenericPlugin } from './base-plugin.js'
+import BasePlugin, { type GenericPlugin } from './base-plugin.js'
 import Decoder from './decoder.js'
+import * as dom from './dom.js'
 import Fetcher from './fetcher.js'
 import Player from './player.js'
 import Renderer from './renderer.js'
 import Timer from './timer.js'
+import WebAudioPlayer from './webaudio.js'
 
 export type WaveSurferOptions = {
-  /** Required: an HTML element or selector where the waveform will be rendered. */
+  /** Required: an HTML element or selector where the waveform will be rendered */
   container: HTMLElement | string
   /** The height of the waveform in pixels, or "auto" to fill the container height */
   height?: number | 'auto'
+  /** The width of the waveform in pixels or any CSS value; defaults to 100% */
+  width?: number | string
   /** The color of the waveform */
   waveColor?: string | string[] | CanvasGradient
   /** The color of the progress mask */
@@ -48,8 +52,10 @@ export type WaveSurferOptions = {
   autoplay?: boolean
   /** Pass false to disable clicks on the waveform */
   interact?: boolean
-  /** Allow to drag the cursor to seek to a new position */
-  dragToSeek?: boolean
+  /** Allow to drag the cursor to seek to a new position. If an object with `debounceTime` is provided instead
+   * then `dragToSeek` will also be true. If `true` the default is 200ms
+   */
+  dragToSeek?: boolean | { debounceTime: number }
   /** Hide the scrollbar */
   hideScrollbar?: boolean
   /** Audio rate, i.e. the playback speed */
@@ -61,7 +67,7 @@ export type WaveSurferOptions = {
   /** Decoding sample rate. Doesn't affect the playback. Defaults to 8000 */
   sampleRate?: number
   /** Render each audio channel as a separate waveform */
-  splitChannels?: WaveSurferOptions[]
+  splitChannels?: Array<Partial<WaveSurferOptions> & { overlay?: boolean }>
   /** Stretch the waveform to the full height */
   normalize?: boolean
   /** The list of plugins to initialize on start */
@@ -70,6 +76,8 @@ export type WaveSurferOptions = {
   renderFunction?: (peaks: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) => void
   /** Options to pass to the fetch method */
   fetchParams?: RequestInit
+  /** Playback "backend" to use, defaults to MediaElement */
+  backend?: 'WebAudio' | 'MediaElement'
 }
 
 const defaultOptions = {
@@ -86,6 +94,8 @@ const defaultOptions = {
 }
 
 export type WaveSurferEvents = {
+  /** After wavesurfer is created */
+  init: []
   /** When audio starts loading */
   load: [url: string]
   /** During audio loading */
@@ -94,8 +104,10 @@ export type WaveSurferEvents = {
   decode: [duration: number]
   /** When the audio is both decoded and can play */
   ready: [duration: number]
-  /** When a waveform is drawn */
+  /** When visible waveform is drawn */
   redraw: []
+  /** When all audio channel chunks of the waveform have drawn */
+  redrawcomplete: []
   /** When the audio starts playing */
   play: []
   /** When the audio pauses */
@@ -116,12 +128,18 @@ export type WaveSurferEvents = {
   dblclick: [relativeX: number, relativeY: number]
   /** When the user drags the cursor */
   drag: [relativeX: number]
+  /** When the user starts dragging the cursor */
+  dragstart: [relativeX: number]
+  /** When the user ends dragging the cursor */
+  dragend: [relativeX: number]
   /** When the waveform is scrolled (panned) */
   scroll: [visibleStartTime: number, visibleEndTime: number]
   /** When the zoom level changes */
   zoom: [minPxPerSec: number]
   /** Just before the waveform is destroyed so you can clean up your events */
   destroy: []
+  /** When source file is unable to be fetched, decoded, or an error is thrown by media element */
+  error: [error: Error]
 }
 
 class WaveSurfer extends Player<WaveSurferEvents> {
@@ -131,7 +149,11 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   private plugins: GenericPlugin[] = []
   private decodedData: AudioBuffer | null = null
   protected subscriptions: Array<() => void> = []
-  private renderDummy: boolean = false
+  protected mediaSubscriptions: Array<() => void> = []
+  protected abortController: AbortController | null = null
+
+  public static readonly BasePlugin = BasePlugin
+  public static readonly dom = dom
 
   /** Create a new WaveSurfer instance */
   public static create(options: WaveSurferOptions) {
@@ -140,17 +162,22 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
   /** Create a new WaveSurfer instance */
   constructor(options: WaveSurferOptions) {
+    const media =
+      options.media ||
+      (options.backend === 'WebAudio' ? (new WebAudioPlayer() as unknown as HTMLAudioElement) : undefined)
+
     super({
-      media: options.media,
+      media,
       mediaControls: options.mediaControls,
       autoplay: options.autoplay,
       playbackRate: options.audioRate,
     })
 
+    this.abortController = new AbortController()
     this.options = Object.assign({}, defaultOptions, options)
     this.timer = new Timer()
 
-    const audioElement = !options.media ? this.getMediaElement() : undefined
+    const audioElement = media ? undefined : this.getMediaElement()
     this.renderer = new Renderer(this.options, audioElement)
 
     this.initPlayerEvents()
@@ -158,30 +185,48 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.initTimerEvents()
     this.initPlugins()
 
-    // Load audio if URL is passed or an external media with an src
-    const url = this.options.url || this.options.media?.currentSrc || this.options.media?.src
-    if (url) {
-      this.load(url, this.options.peaks, this.options.duration)
-    }
+    // Init and load async to allow external events to be registered
+    Promise.resolve().then(() => {
+      this.emit('init')
+
+      // Load audio if URL or an external media with an src is passed,
+      // of render w/o audio if pre-decoded peaks and duration are provided
+      const url = this.options.url || this.getSrc() || ''
+      if (url || (this.options.peaks && this.options.duration)) {
+        // Swallow async errors because they cannot be caught from a constructor call.
+        // Subscribe to the wavesurfer's error event to handle them.
+        this.load(url, this.options.peaks, this.options.duration).catch(() => null)
+      }
+    })
+  }
+
+  private updateProgress(currentTime = this.getCurrentTime()): number {
+    this.renderer.renderProgress(currentTime / this.getDuration(), this.isPlaying())
+    return currentTime
   }
 
   private initTimerEvents() {
     // The timer fires every 16ms for a smooth progress animation
     this.subscriptions.push(
       this.timer.on('tick', () => {
-        const currentTime = this.getCurrentTime()
-        this.renderer.renderProgress(currentTime / this.getDuration(), true)
-        this.emit('timeupdate', currentTime)
-        this.emit('audioprocess', currentTime)
+        if (!this.isSeeking()) {
+          const currentTime = this.updateProgress()
+          this.emit('timeupdate', currentTime)
+          this.emit('audioprocess', currentTime)
+        }
       }),
     )
   }
 
   private initPlayerEvents() {
-    this.subscriptions.push(
+    if (this.isPlaying()) {
+      this.emit('play')
+      this.timer.start()
+    }
+
+    this.mediaSubscriptions.push(
       this.onMediaEvent('timeupdate', () => {
-        const currentTime = this.getCurrentTime()
-        this.renderer.renderProgress(currentTime / this.getDuration(), this.isPlaying())
+        const currentTime = this.updateProgress()
         this.emit('timeupdate', currentTime)
       }),
 
@@ -205,6 +250,10 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
       this.onMediaEvent('seeking', () => {
         this.emit('seeking', this.getCurrentTime())
+      }),
+
+      this.onMediaEvent('error', (err) => {
+        this.emit('error', err.error)
       }),
     )
   }
@@ -235,6 +284,21 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       this.renderer.on('render', () => {
         this.emit('redraw')
       }),
+
+      // RedrawComplete
+      this.renderer.on('rendered', () => {
+        this.emit('redrawcomplete')
+      }),
+
+      // DragStart
+      this.renderer.on('dragstart', (relativeX) => {
+        this.emit('dragstart', relativeX)
+      }),
+
+      // DragEnd
+      this.renderer.on('dragend', (relativeX) => {
+        this.emit('dragend', relativeX)
+      }),
     )
 
     // Drag
@@ -249,12 +313,19 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
           // Set the audio position with a debounce
           clearTimeout(debounce)
-          debounce = setTimeout(
-            () => {
-              this.seekTo(relativeX)
-            },
-            this.isPlaying() ? 0 : 200,
-          )
+          let debounceTime
+
+          if (this.isPlaying()) {
+            debounceTime = 0
+          } else if (this.options.dragToSeek === true) {
+            debounceTime = 200
+          } else if (typeof this.options.dragToSeek === 'object' && this.options.dragToSeek !== undefined) {
+            debounceTime = this.options.dragToSeek['debounceTime']
+          }
+
+          debounce = setTimeout(() => {
+            this.seekTo(relativeX)
+          }, debounceTime)
 
           this.emit('interaction', relativeX * this.getDuration())
           this.emit('drag', relativeX)
@@ -269,6 +340,11 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.options.plugins.forEach((plugin) => {
       this.registerPlugin(plugin)
     })
+  }
+
+  private unsubscribePlayerEvents() {
+    this.mediaSubscriptions.forEach((unsubscribe) => unsubscribe())
+    this.mediaSubscriptions = []
   }
 
   /** Set new wavesurfer options and re-render it */
@@ -286,7 +362,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
   /** Register a wavesurfer.js plugin */
   public registerPlugin<T extends GenericPlugin>(plugin: T): T {
-    plugin.init(this)
+    plugin._init(this)
     this.plugins.push(plugin)
 
     // Unregister plugin on destroy
@@ -309,6 +385,12 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     return this.renderer.getScroll()
   }
 
+  /** Move the start of the viewing window to a specific time in the audio (in seconds) */
+  public setScrollTime(time: number) {
+    const percentage = time / this.getDuration()
+    this.renderer.setScrollPercentage(percentage)
+  }
+
   /** Get all registered plugins */
   public getActivePlugins() {
     return this.plugins
@@ -324,24 +406,32 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     // Fetch the entire audio as a blob if pre-decoded data is not provided
     if (!blob && !channelData) {
       const onProgress = (percentage: number) => this.emit('loading', percentage)
-      blob = await Fetcher.fetchBlob(url, onProgress, this.options.fetchParams)
+      const fetchParams = { signal: this.abortController?.signal, ...(this.options.fetchParams || {}) }
+      blob = await Fetcher.fetchBlob(url, onProgress, fetchParams)
     }
 
     // Set the mediaelement source
     this.setSrc(url, blob)
 
+    // Wait for the audio duration
+    const audioDuration =
+      duration ||
+      this.getDuration() ||
+      (await new Promise((resolve) => {
+        this.onMediaEvent('loadedmetadata', () => resolve(this.getDuration()), { once: true })
+      }))
+
+    // Set the duration if the player is a WebAudioPlayer without a URL
+    if (!url && !blob) {
+      const media = this.getMediaElement()
+      if (media instanceof WebAudioPlayer) {
+        media.duration = audioDuration
+      }
+    }
+
     // Decode the audio data or use user-provided peaks
     if (channelData) {
-      // Wait for the audio duration
-      // It should be a promise to allow event listeners to subscribe to the ready and decode events
-      duration =
-        (await Promise.resolve(duration || this.getDuration())) ||
-        (await new Promise((resolve) => {
-          this.onceMediaEvent('loadedmetadata', () => resolve(this.getDuration()))
-        })) ||
-        (await Promise.resolve(0))
-
-      this.decodedData = Decoder.createBuffer(channelData, duration)
+      this.decodedData = Decoder.createBuffer(channelData, audioDuration || 0)
     } else if (blob) {
       const arrayBuffer = await blob.arrayBuffer()
       if (this.options.maxBufferSize != null) {
@@ -355,13 +445,9 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       }
     }
 
-    this.emit('decode', this.getDuration())
-
-    // Render the waveform
     if (this.decodedData) {
+      this.emit('decode', this.getDuration())
       this.renderer.render(this.decodedData)
-    } else if (this.renderDummy) {
-      this.renderer.renderDummyWaveform()
     }
 
     this.emit('ready', this.getDuration())
@@ -369,12 +455,22 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
   /** Load an audio file by URL, with optional pre-decoded audio data */
   public async load(url: string, channelData?: WaveSurferOptions['peaks'], duration?: number) {
-    await this.loadAudio(url, undefined, channelData, duration)
+    try {
+      return await this.loadAudio(url, undefined, channelData, duration)
+    } catch (err) {
+      this.emit('error', err as Error)
+      throw err
+    }
   }
 
   /** Load an audio blob */
   public async loadBlob(blob: Blob, channelData?: WaveSurferOptions['peaks'], duration?: number) {
-    await this.loadAudio('blob', blob, channelData, duration)
+    try {
+      return await this.loadAudio('blob', blob, channelData, duration)
+    } catch (err) {
+      this.emit('error', err as Error)
+      throw err
+    }
   }
 
   /** Zoom the waveform by a given pixels-per-second factor */
@@ -404,7 +500,11 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       const sampleSize = Math.round(channel.length / maxLength)
       for (let i = 0; i < maxLength; i++) {
         const sample = channel.slice(i * sampleSize, (i + 1) * sampleSize)
-        const max = Math.max(...sample)
+        let max = 0
+        for (let x = 0; x < sample.length; x++) {
+          const n = sample[x]
+          if (Math.abs(n) > Math.abs(max)) max = n
+        }
         data.push(Math.round(max * precision) / precision)
       }
       peaks.push(data)
@@ -425,6 +525,13 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   /** Toggle if the waveform should react to clicks */
   public toggleInteraction(isInteractive: boolean) {
     this.options.interact = isInteractive
+  }
+
+  /** Jump to a specific time in the audio (in seconds) */
+  public setTime(time: number) {
+    super.setTime(time)
+    this.updateProgress(time)
+    this.emit('timeupdate', time)
   }
 
   /** Seek to a percentage of audio as [0..1] (0 = beginning, 1 = end) */
@@ -449,16 +556,43 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.setTime(this.getCurrentTime() + seconds)
   }
 
-  /** Empty the waveform by loading a tiny silent audio */
+  /** Empty the waveform */
   public empty() {
     this.load('', [[0]], 0.001)
+  }
+
+  /** Set HTML media element */
+  public setMediaElement(element: HTMLMediaElement) {
+    this.unsubscribePlayerEvents()
+    super.setMediaElement(element)
+    this.initPlayerEvents()
+  }
+
+  /**
+   * Export the waveform image as a data-URI or a blob.
+   *
+   * @param format The format of the exported image, can be `image/png`, `image/jpeg`, `image/webp` or any other format supported by the browser.
+   * @param quality The quality of the exported image, for `image/jpeg` or `image/webp`. Must be between 0 and 1.
+   * @param type The type of the exported image, can be `dataURL` (default) or `blob`.
+   * @returns A promise that resolves with an array of data-URLs or blobs, one for each canvas element.
+   */
+  public async exportImage(format: string, quality: number, type: 'dataURL'): Promise<string[]>
+  public async exportImage(format: string, quality: number, type: 'blob'): Promise<Blob[]>
+  public async exportImage(
+    format = 'image/png',
+    quality = 1,
+    type: 'dataURL' | 'blob' = 'dataURL',
+  ): Promise<string[] | Blob[]> {
+    return this.renderer.exportImage(format, quality, type)
   }
 
   /** Unmount wavesurfer */
   public destroy() {
     this.emit('destroy')
+    this.abortController?.abort()
     this.plugins.forEach((plugin) => plugin.destroy())
     this.subscriptions.forEach((unsubscribe) => unsubscribe())
+    this.unsubscribePlayerEvents()
     this.timer.destroy()
     this.renderer.destroy()
     super.destroy()

@@ -9,7 +9,8 @@ It's fairly dumb... but it works!
 
 This repo will be synced ideally for every release on the original repo.
 Basically via 
-```git remote add upstream https://github.com/katspaugh/wavesurfer.js
+```
+git remote add upstream https://github.com/katspaugh/wavesurfer.js
 git fetch --tags upstream
 git merge <tag>
 ```
@@ -17,15 +18,9 @@ That's about it. The full, unaltered,original readme continues below. Thanks for
 
 # <img src="https://user-images.githubusercontent.com/381895/226091100-f5567a28-7736-4d37-8f84-e08f297b7e1a.png" alt="logo" height="60" valign="middle" /> wavesurfer.js
 
-[![npm](https://img.shields.io/npm/v/wavesurfer.js)](https://www.npmjs.com/package/wavesurfer.js)
+[![npm](https://img.shields.io/npm/v/wavesurfer.js)](https://www.npmjs.com/package/wavesurfer.js) [![sponsor](https://img.shields.io/badge/sponsor_us-🤍-%23B14586)](https://github.com/sponsors/katspaugh)
 
-## New TypeScript version
-
-wavesurfer.js v7 is a TypeScript rewrite of wavesurfer.js that brings several improvements:
-
- * Typed API for better development experience
- * Enhanced decoding and rendering performance
- * New and improved plugins
+**Wavesurfer.js** is an interactive waveform rendering and audio playback library, perfect for web applications. It leverages modern web technologies to provide a robust and visually engaging audio experience.
 
 <img width="626" alt="waveform screenshot" src="https://github.com/katspaugh/wavesurfer.js/assets/381895/05f03bed-800e-4fa1-b09a-82a39a1c62ce">
 
@@ -57,7 +52,7 @@ const wavesurfer = WaveSurfer.create({
 
 To import one of the plugins, e.g. the [Regions plugin](https://wavesurfer.xyz/examples/?regions.js):
 ```js
-import Regions from 'wavesurfer.js/dist/plugins/regions.js'
+import Regions from 'wavesurfer.js/dist/plugins/regions.esm.js'
 ```
 
 Or as a script tag that will export `WaveSurfer.Regions`:
@@ -79,7 +74,7 @@ See the wavesurfer.js documentation on our website:
 
 ## Plugins
 
-The "official" plugins have been completely rewritten and enhanced:
+We maintain a number of official plugins that add various extra features:
 
  * [Regions](https://wavesurfer.xyz/examples/?regions.js) – visual overlays and markers for regions of audio
  * [Timeline](https://wavesurfer.xyz/examples/?timeline.js) – displays notches and time labels below the waveform
@@ -105,23 +100,65 @@ For example:
 ```
 
 You can see which elements you can style in the DOM inspector – they will have a `part` attribute.
-See [this example](https://wavesurfer.xyz/examples/?styling.js) for play around with styling.
+See [this example](https://wavesurfer.xyz/examples/?styling.js) to play around with styling.
 
-## Upgrading from v6
+## Questions
+
+Have a question about integrating wavesurfer.js on your website? Feel free to ask in our [Discussions forum](https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a).
+
+However, please keep in mind that this forum is dedicated to wavesurfer-specific questions. If you're new to JavaScript and need help with the general basics like importing NPM modules, please consider asking ChatGPT or StackOverflow first.
+
+### FAQ
+
+<details>
+  <summary>I'm having CORS issues</summary>
+  Wavesurfer fetches audio from the URL you specify in order to decode it. Make sure this URL allows fetching data from your domain. In browser JavaScript, you can only fetch data eithetr from <b>the same domain</b> or another domain if and only if that domain enables <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS">CORS</a>. So if your audio file is on an external domain, make sure that domain sends the right Access-Control-Allow-Origin headers. There's nothing you can do about it from the requesting side (i.e. your JS code).
+</details>
+
+<details>
+  <summary>Does wavesurfer support large files?</summary>
+  Since wavesurfer decodes audio entirely in the browser using Web Audio, large clips may fail to decode due to memory constraints. We recommend using pre-decoded peaks for large files (see <a href="https://wavesurfer.xyz/examples/?predecoded.js">this example</a>). You can use a tool like <a href="https://github.com/bbc/audiowaveform">bbc/audiowaveform</a> to generate peaks.
+</details>
+
+<details>
+  <summary>What about streaming audio?</summary>
+  Streaming audio is supported only with <a href="https://wavesurfer.xyz/examples/?predecoded.js">pre-decoded peaks and duration</a>.
+</details>
+
+<details>
+  <summary>There is a mismatch between my audio and the waveform. How do I fix it?</summary>
+  If you're using a VBR (variable bit rate) audio file, there might be a mismatch between the audio and the waveform. This can be fixed by converting your file to CBR (constant bit rate).
+  <p>Alternatively, you can use the <a href="https://wavesurfer.xyz/examples/?webaudio-shim.js">Web Audio shim</a> which is more accurate.</p>
+</details>
+
+<details>
+  <summary>How do I connect wavesurfer.js to Web Audio effects?</summary>
+Generally, wavesurfer.js doesn't aim to be a wrapper for all things Web Audio. It's just a player with a waveform visualization. It does allow connecting itself to a Web Audio graph by exporting its audio element (see <a href="https://wavesurfer.xyz/examples/?4436ec40a2ab943243755e659ae32196">this example</a>) but nothign more than that. Please don't expect wavesurfer to be able to cut, add effects, or process your audio in any way.
+</details>
+
+## v7 – a new TypeScript version
+
+Wavesurfer.js v7 is a TypeScript rewrite of wavesurfer.js that brings several improvements:
+
+ * Typed API for better development experience
+ * Enhanced decoding and rendering performance
+ * New and improved plugins
+
+### Upgrading from v6
 
 Most options, events, and methods are similar to those in previous versions.
 
 ### Notable differences
- * The `backend` option is removed – [HTML5 audio (or video) is the only playback mechanism](https://github.com/katspaugh/wavesurfer.js/discussions/2762#discussioncomment-5669347). However, you can still connect wavesurfer to Web Audio via `MediaElementSourceNode`. See this [example](https://wavesurfer.xyz/examples/?webaudio.js).
+ * HTML audio playback by default (used to be an opt-in via `backend: "MediaElement"`)
  * The Markers plugin is removed – you should use the Regions plugin with just a `startTime`.
  * No Microphone plugin – superseded by the new Record plugin with more features.
  * The Cursor plugin is replaced by the Hover plugin.
 
 ### Removed options
- * `backend`, `audioContext`, `closeAudioContext`, `audioScriptProcessor` – there's no Web Audio backend, so no AudioContext
+ * `audioContext`, `closeAudioContext`, `audioScriptProcessor`
  * `autoCenterImmediately` – `autoCenter` is now always immediate unless the audio is playing
  * `backgroundColor`, `hideCursor` – this can be easily set via CSS
- * `mediaType`, `mediaControls` – you should instead pass an entire media element in the `media` option. [Example](https://wavesurfer.xyz/examples/?video.js).
+ * `mediaType` – you should instead pass an entire media element in the `media` option. [Example](https://wavesurfer.xyz/examples/?video.js).
  * `partialRender` – done by default
  * `pixelRatio` – `window.devicePixelRatio` is used by default
  * `renderer` – there's just one renderer for now, so no need for this option
@@ -134,35 +171,15 @@ Most options, events, and methods are similar to those in previous versions.
  * `barMinHeight` - the minimum bar height is now 1 pixel by default
 
 ### Removed methods
- * `getFilters`, `setFilter` – as there's no Web Audio "backend"
+ * `getFilters`, `setFilter` – see the [Web Audio example](https://wavesurfer.xyz/examples/?webaudio.js)
  * `drawBuffer` – to redraw the waveform, use `setOptions` instead and pass new rendering options
  * `cancelAjax` – you can pass an [AbortSignal](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal) in `fetchParams`
  * `skipForward`, `skipBackward`, `setPlayEnd` – can be implemented using `setTime(time)`
- * `exportPCM` is replaced with `exportPeaks` that returns arrays of floats
+ * `exportPCM` is replaced with `exportPeaks` which returns arrays of floats
  * `toggleMute` is now called `setMuted(true | false)`
  * `setHeight`, `setWaveColor`, `setCursorColor`, etc. – use `setOptions` with the corresponding params instead. E.g., `wavesurfer.setOptions({ height: 300, waveColor: '#abc' })`
 
 See the complete [documentation of the new API](http://wavesurfer.xyz/docs).
-
-## Questions
-
-Have a question about integrating wavesurfer.js on your website? Feel free to ask in our [Discussions forum](https://github.com/wavesurfer-js/wavesurfer.js/discussions/categories/q-a).
-
-### FAQ
-
-* **Q**: Does wavesurfer support large files?
-* **A**: Since wavesurfer decodes audio entirely in the browser using Web Audio, large clips may fail to decode due to memory constraints. We recommend using pre-decoded peaks for large files (see [this example](https://wavesurfer.xyz/examples/?predecoded.js)). You can use a tool like [bbc/audiowaveform](https://github.com/bbc/audiowaveform) to generate peaks.
-
----
-
-* **Q**: What about streaming audio?
-* **A**: Streaming isn't supported because wavesurfer needs to download the entire audio file to decode and render it.
-
----
-
-* **Q**: There is a mismatch between my audio and the waveform. How do I fix it?
-* **A**: If you're using a VBR (variable bit rate) audio file, there might be a mismatch between the audio and the waveform. This can be fixed by converting your file to CBR (constant bit rate). See [this issue](https://github.com/katspaugh/wavesurfer.js/issues/2890#issuecomment-1601067822) for details.
-
 
 ## Development
 

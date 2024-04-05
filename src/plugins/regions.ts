@@ -7,12 +7,14 @@
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
 import { makeDraggable } from '../draggable.js'
 import EventEmitter from '../event-emitter.js'
+import createElement from '../dom.js'
 
 export type RegionsPluginOptions = undefined
 
 export type RegionsPluginEvents = BasePluginEvents & {
   'region-created': [region: Region]
   'region-updated': [region: Region]
+  'region-removed': [region: Region]
   'region-clicked': [region: Region, e: MouseEvent]
   'region-double-clicked': [region: Region, e: MouseEvent]
   'region-in': [region: Region]
@@ -23,7 +25,7 @@ export type RegionEvents = {
   /** Before the region is removed */
   remove: []
   /** When the region's parameters are being updated */
-  update: []
+  update: [side?: 'start' | 'end']
   /** When dragging or resizing is finished */
   'update-end': []
   /** On play */
@@ -57,6 +59,10 @@ export type RegionParams = {
   minLength?: number
   /** Max length when resizing (in seconds) */
   maxLength?: number
+  /** The index of the channel */
+  channelIdx?: number
+  /** Allow/Disallow contenteditable property for content */
+  contentEditable?: boolean
 }
 
 class SingleRegion extends EventEmitter<RegionEvents> {
@@ -70,18 +76,24 @@ class SingleRegion extends EventEmitter<RegionEvents> {
   public content?: HTMLElement
   public minLength = 0
   public maxLength = Infinity
+  public channelIdx: number
+  public contentEditable = false
+  public subscriptions: (() => void)[] = []
 
-  constructor(params: RegionParams, private totalDuration: number) {
+  constructor(params: RegionParams, private totalDuration: number, private numberOfChannels = 0) {
     super()
 
+    this.subscriptions = []
     this.id = params.id || `region-${Math.random().toString(32).slice(2)}`
-    this.start = params.start
-    this.end = params.end ?? params.start
+    this.start = this.clampPosition(params.start)
+    this.end = this.clampPosition(params.end ?? params.start)
     this.drag = params.drag ?? true
     this.resize = params.resize ?? true
     this.color = params.color ?? 'rgba(0, 0, 0, 0.1)'
     this.minLength = params.minLength ?? this.minLength
     this.maxLength = params.maxLength ?? this.maxLength
+    this.channelIdx = params.channelIdx ?? -1
+    this.contentEditable = params.contentEditable ?? this.contentEditable
     this.element = this.initElement()
     this.setContent(params.content)
     this.setPart()
@@ -90,62 +102,114 @@ class SingleRegion extends EventEmitter<RegionEvents> {
     this.initMouseEvents()
   }
 
+  private clampPosition(time: number): number {
+    return Math.max(0, Math.min(this.totalDuration, time))
+  }
+
   private setPart() {
     const isMarker = this.start === this.end
     this.element.setAttribute('part', `${isMarker ? 'marker' : 'region'} ${this.id}`)
   }
 
+  private addResizeHandles(element: HTMLElement) {
+    const handleStyle = {
+      position: 'absolute',
+      zIndex: '2',
+      width: '6px',
+      height: '100%',
+      top: '0',
+      cursor: 'ew-resize',
+      wordBreak: 'keep-all',
+    }
+
+    const leftHandle = createElement(
+      'div',
+      {
+        part: 'region-handle region-handle-left',
+        style: {
+          ...handleStyle,
+          left: '0',
+          borderLeft: '2px solid rgba(0, 0, 0, 0.5)',
+          borderRadius: '2px 0 0 2px',
+        },
+      },
+      element,
+    )
+
+    const rightHandle = createElement(
+      'div',
+      {
+        part: 'region-handle region-handle-right',
+        style: {
+          ...handleStyle,
+          right: '0',
+          borderRight: '2px solid rgba(0, 0, 0, 0.5)',
+          borderRadius: '0 2px 2px 0',
+        },
+      },
+      element,
+    )
+
+    // Resize
+    const resizeThreshold = 1
+    this.subscriptions.push(
+      makeDraggable(
+        leftHandle,
+        (dx) => this.onResize(dx, 'start'),
+        () => null,
+        () => this.onEndResizing(),
+        resizeThreshold,
+      ),
+      makeDraggable(
+        rightHandle,
+        (dx) => this.onResize(dx, 'end'),
+        () => null,
+        () => this.onEndResizing(),
+        resizeThreshold,
+      ),
+    )
+  }
+
+  private removeResizeHandles(element: HTMLElement) {
+    const leftHandle = element.querySelector('[part*="region-handle-left"]')
+    const rightHandle = element.querySelector('[part*="region-handle-right"]')
+    if (leftHandle) {
+      element.removeChild(leftHandle)
+    }
+    if (rightHandle) {
+      element.removeChild(rightHandle)
+    }
+  }
+
   private initElement() {
-    const element = document.createElement('div')
     const isMarker = this.start === this.end
 
-    element.setAttribute(
-      'style',
-      `
-      position: absolute;
-      height: 100%;
-      background-color: ${isMarker ? 'none' : this.color};
-      border-left: ${isMarker ? '2px solid ' + this.color : 'none'};
-      border-radius: 2px;
-      box-sizing: border-box;
-      transition: background-color 0.2s ease;
-      cursor: ${this.drag ? 'grab' : 'default'};
-      pointer-events: all;
-    `,
-    )
+    let elementTop = 0
+    let elementHeight = 100
+
+    if (this.channelIdx >= 0 && this.channelIdx < this.numberOfChannels) {
+      elementHeight = 100 / this.numberOfChannels
+      elementTop = elementHeight * this.channelIdx
+    }
+
+    const element = createElement('div', {
+      style: {
+        position: 'absolute',
+        top: `${elementTop}%`,
+        height: `${elementHeight}%`,
+        backgroundColor: isMarker ? 'none' : this.color,
+        borderLeft: isMarker ? '2px solid ' + this.color : 'none',
+        borderRadius: '2px',
+        boxSizing: 'border-box',
+        transition: 'background-color 0.2s ease',
+        cursor: this.drag ? 'grab' : 'default',
+        pointerEvents: 'all',
+      },
+    })
 
     // Add resize handles
     if (!isMarker && this.resize) {
-      const leftHandle = document.createElement('div')
-      leftHandle.setAttribute('data-resize', 'left')
-      leftHandle.setAttribute(
-        'style',
-        `
-        position: absolute;
-        z-index: 2;
-        width: 6px;
-        height: 100%;
-        top: 0;
-        left: 0;
-        border-left: 2px solid rgba(0, 0, 0, 0.5);
-        border-radius: 2px 0 0 2px;
-        cursor: ${this.resize ? 'ew-resize' : 'default'};
-        word-break: keep-all;
-      `,
-      )
-      leftHandle.setAttribute('part', 'region-handle region-handle-left')
-
-      const rightHandle = leftHandle.cloneNode() as HTMLElement
-      rightHandle.setAttribute('data-resize', 'right')
-      rightHandle.style.left = ''
-      rightHandle.style.right = '0'
-      rightHandle.style.borderRight = rightHandle.style.borderLeft
-      rightHandle.style.borderLeft = ''
-      rightHandle.style.borderRadius = '0 2px 2px 0'
-      rightHandle.setAttribute('part', 'region-handle region-handle-right')
-
-      element.appendChild(leftHandle)
-      element.appendChild(rightHandle)
+      this.addResizeHandles(element)
     }
 
     return element
@@ -158,6 +222,11 @@ class SingleRegion extends EventEmitter<RegionEvents> {
     this.element.style.right = `${end * 100}%`
   }
 
+  private toggleCursor(toggle: boolean) {
+    if (!this.drag || !this.element?.style) return
+    this.element.style.cursor = toggle ? 'grabbing' : 'grab'
+  }
+
   private initMouseEvents() {
     const { element } = this
     if (!element) return
@@ -166,47 +235,32 @@ class SingleRegion extends EventEmitter<RegionEvents> {
     element.addEventListener('mouseenter', (e) => this.emit('over', e))
     element.addEventListener('mouseleave', (e) => this.emit('leave', e))
     element.addEventListener('dblclick', (e) => this.emit('dblclick', e))
+    element.addEventListener('pointerdown', () => this.toggleCursor(true))
+    element.addEventListener('pointerup', () => this.toggleCursor(false))
 
     // Drag
-    makeDraggable(
-      element,
-      (dx) => this.onMove(dx),
-      () => this.onStartMoving(),
-      () => this.onEndMoving(),
+    this.subscriptions.push(
+      makeDraggable(
+        element,
+        (dx) => this.onMove(dx),
+        () => this.toggleCursor(true),
+        () => {
+          this.toggleCursor(false)
+          this.drag && this.emit('update-end')
+        },
+      ),
     )
 
-    // Resize
-    const resizeThreshold = 1
-    makeDraggable(
-      element.querySelector('[data-resize="left"]') as HTMLElement,
-      (dx) => this.onResize(dx, 'start'),
-      () => null,
-      () => this.onEndResizing(),
-      resizeThreshold,
-    )
-    makeDraggable(
-      element.querySelector('[data-resize="right"]') as HTMLElement,
-      (dx) => this.onResize(dx, 'end'),
-      () => null,
-      () => this.onEndResizing(),
-      resizeThreshold,
-    )
-  }
-
-  private onStartMoving() {
-    if (!this.drag) return
-    this.element.style.cursor = 'grabbing'
-  }
-
-  private onEndMoving() {
-    if (!this.drag) return
-    this.element.style.cursor = 'grab'
-    this.emit('update-end')
+    if (this.contentEditable && this.content) {
+      this.content.addEventListener('click', (e) => this.onContentClick(e))
+      this.content.addEventListener('blur', () => this.onContentBlur())
+    }
   }
 
   public _onUpdate(dx: number, side?: 'start' | 'end') {
     if (!this.element.parentElement) return
-    const deltaSeconds = (dx / this.element.parentElement.clientWidth) * this.totalDuration
+    const { width } = this.element.parentElement.getBoundingClientRect()
+    const deltaSeconds = (dx / width) * this.totalDuration
     const newStart = !side || side === 'start' ? this.start + deltaSeconds : this.start
     const newEnd = !side || side === 'end' ? this.end + deltaSeconds : this.end
     const length = newEnd - newStart
@@ -222,7 +276,7 @@ class SingleRegion extends EventEmitter<RegionEvents> {
       this.end = newEnd
 
       this.renderPosition()
-      this.emit('update')
+      this.emit('update', side)
     }
   }
 
@@ -238,6 +292,17 @@ class SingleRegion extends EventEmitter<RegionEvents> {
 
   private onEndResizing() {
     if (!this.resize) return
+    this.emit('update-end')
+  }
+
+  private onContentClick(event: MouseEvent) {
+    event.stopPropagation()
+    const contentContainer = event.target as HTMLDivElement
+    contentContainer.focus()
+    this.emit('click', event)
+  }
+
+  public onContentBlur() {
     this.emit('update-end')
   }
 
@@ -259,12 +324,19 @@ class SingleRegion extends EventEmitter<RegionEvents> {
       return
     }
     if (typeof content === 'string') {
-      this.content = document.createElement('div')
       const isMarker = this.start === this.end
-      this.content.style.padding = `0.2em ${isMarker ? 0.2 : 0.4}em`
-      this.content.textContent = content
+      this.content = createElement('div', {
+        style: {
+          padding: `0.2em ${isMarker ? 0.2 : 0.4}em`,
+          display: 'inline-block',
+        },
+        textContent: content,
+      })
     } else {
       this.content = content
+    }
+    if (this.contentEditable) {
+      this.content.contentEditable = 'true'
     }
     this.content.setAttribute('part', 'region-content')
     this.element.appendChild(this.content)
@@ -276,35 +348,44 @@ class SingleRegion extends EventEmitter<RegionEvents> {
       this.color = options.color
       this.element.style.backgroundColor = this.color
     }
+
     if (options.drag !== undefined) {
       this.drag = options.drag
       this.element.style.cursor = this.drag ? 'grab' : 'default'
     }
-    if (options.resize !== undefined) {
-      this.resize = options.resize
-      this.element.querySelectorAll('[data-resize]').forEach((handle) => {
-        ;(handle as HTMLElement).style.cursor = this.resize ? 'ew-resize' : 'default'
-      })
-    }
+
     if (options.start !== undefined || options.end !== undefined) {
       const isMarker = this.start === this.end
-      this.start = options.start ?? this.start
-      this.end = options.end ?? (isMarker ? this.start : this.end)
+      this.start = this.clampPosition(options.start ?? this.start)
+      this.end = this.clampPosition(options.end ?? (isMarker ? this.start : this.end))
       this.renderPosition()
       this.setPart()
     }
+
     if (options.content) {
       this.setContent(options.content)
     }
+
     if (options.id) {
       this.id = options.id
       this.setPart()
+    }
+
+    if (options.resize !== undefined && options.resize !== this.resize) {
+      const isMarker = this.start === this.end
+      this.resize = options.resize
+      if (this.resize && !isMarker) {
+        this.addResizeHandles(this.element)
+      } else {
+        this.removeResizeHandles(this.element)
+      }
     }
   }
 
   /** Remove the region */
   public remove() {
     this.emit('remove')
+    this.subscriptions.forEach((unsubscribe) => unsubscribe())
     this.element.remove()
     // This violates the type but we want to clean up the DOM reference
     // w/o having to have a nullable type of the element
@@ -338,7 +419,11 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     this.subscriptions.push(
       this.wavesurfer.on('timeupdate', (currentTime) => {
         // Detect when regions are being played
-        const playedRegions = this.regions.filter((region) => region.start <= currentTime && region.end >= currentTime)
+        const playedRegions = this.regions.filter(
+          (region) =>
+            region.start <= currentTime &&
+            (region.end === region.start ? region.start + 0.05 : region.end) >= currentTime,
+        )
 
         // Trigger region-in when activeRegions doesn't include a played regions
         playedRegions.forEach((region) => {
@@ -361,20 +446,17 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
   }
 
   private initRegionsContainer(): HTMLElement {
-    const div = document.createElement('div')
-    div.setAttribute(
-      'style',
-      `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 3;
-      pointer-events: none;
-    `,
-    )
-    return div
+    return createElement('div', {
+      style: {
+        position: 'absolute',
+        top: '0',
+        left: '0',
+        width: '100%',
+        height: '100%',
+        zIndex: '3',
+        pointerEvents: 'none',
+      },
+    })
   }
 
   /** Get all created regions */
@@ -388,20 +470,37 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     // Check that the label doesn't overlap with other labels
     // If it does, push it down until it doesn't
     const div = region.content as HTMLElement
-    const labelLeft = div.getBoundingClientRect().left
-    const labelWidth = region.element.scrollWidth
+    const box = div.getBoundingClientRect()
 
     const overlap = this.regions
-      .filter((reg) => {
-        if (reg === region || !reg.content) return false
-        const left = reg.content.getBoundingClientRect().left
-        const width = reg.element.scrollWidth
-        return labelLeft < left + width && left < labelLeft + labelWidth
+      .map((reg) => {
+        if (reg === region || !reg.content) return 0
+
+        const otherBox = reg.content.getBoundingClientRect()
+        if (box.left < otherBox.left + otherBox.width && otherBox.left < box.left + box.width) {
+          return otherBox.height
+        }
+        return 0
       })
-      .map((reg) => reg.content?.getBoundingClientRect().height || 0)
       .reduce((sum, val) => sum + val, 0)
 
     div.style.marginTop = `${overlap}px`
+  }
+
+  private adjustScroll(region: Region) {
+    const scrollContainer = this.wavesurfer?.getWrapper()?.parentElement
+    if (!scrollContainer) return
+    const { clientWidth, scrollWidth } = scrollContainer
+    if (scrollWidth <= clientWidth) return
+    const scrollBbox = scrollContainer.getBoundingClientRect()
+    const bbox = region.element.getBoundingClientRect()
+    const left = bbox.left - scrollBbox.left
+    const right = bbox.right - scrollBbox.left
+    if (left < 0) {
+      scrollContainer.scrollLeft += left
+    } else if (right > clientWidth) {
+      scrollContainer.scrollLeft += right - clientWidth
+    }
   }
 
   private saveRegion(region: Region) {
@@ -410,6 +509,13 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     this.regions.push(region)
 
     const regionSubscriptions = [
+      region.on('update', (side) => {
+        // Undefined side indicates that we are dragging not resizing
+        if (!side) {
+          this.adjustScroll(region)
+        }
+      }),
+
       region.on('update-end', () => {
         this.avoidOverlapping(region)
         this.emit('region-updated', region)
@@ -432,6 +538,7 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
       region.once('remove', () => {
         regionSubscriptions.forEach((unsubscribe) => unsubscribe())
         this.regions = this.regions.filter((reg) => reg !== region)
+        this.emit('region-removed', region)
       }),
     ]
 
@@ -447,7 +554,8 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     }
 
     const duration = this.wavesurfer.getDuration()
-    const region = new SingleRegion(options, duration)
+    const numberOfChannels = this.wavesurfer?.getDecodedData()?.numberOfChannels
+    const region = new SingleRegion(options, duration, numberOfChannels)
 
     if (!duration) {
       this.subscriptions.push(
@@ -467,9 +575,9 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
    * Enable creation of regions by dragging on an empty space on the waveform.
    * Returns a function to disable the drag selection.
    */
-  public enableDragSelection(options: Omit<RegionParams, 'start' | 'end'>): () => void {
-    const wrapper = this.wavesurfer?.getWrapper()?.querySelector('div')
-    if (!wrapper) return () => undefined
+  public enableDragSelection(options: Omit<RegionParams, 'start' | 'end'>, threshold = 3): () => void {
+    const wrapper = this.wavesurfer?.getWrapper()
+    if (!wrapper || !(wrapper instanceof HTMLElement)) return () => undefined
 
     const initialSize = 5
     let region: Region | null = null
@@ -492,7 +600,8 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
         startX = x
         if (!this.wavesurfer) return
         const duration = this.wavesurfer.getDuration()
-        const width = this.wavesurfer.getWrapper().clientWidth
+        const numberOfChannels = this.wavesurfer?.getDecodedData()?.numberOfChannels
+        const { width } = this.wavesurfer.getWrapper().getBoundingClientRect()
         // Calculate the start time of the region
         const start = (x / width) * duration
         // Give the region a small initial size
@@ -506,6 +615,7 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
             end,
           },
           duration,
+          numberOfChannels,
         )
         // Just add it to the DOM for now
         this.regionsContainer.appendChild(region.element)
@@ -518,6 +628,8 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
           region = null
         }
       },
+
+      threshold,
     )
   }
 
@@ -530,8 +642,10 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
   public destroy() {
     this.clearRegions()
     super.destroy()
+    this.regionsContainer.remove()
   }
 }
 
 export default RegionsPlugin
-export type Region = SingleRegion
+
+export type Region = InstanceType<typeof SingleRegion>
