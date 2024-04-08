@@ -80,6 +80,6 @@
     "typescript": "^5.0.4"
   },
   "dependencies": {
-    "wavesurfer.js": "^7.7.9"
+    "wavesurfer.js": "^7.7.10"
   }
 }
