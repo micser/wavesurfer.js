@@ -69,8 +69,8 @@
     "@rollup/plugin-typescript": "^11.1.2",
     "@typescript-eslint/eslint-plugin": "^5.57.0",
     "@typescript-eslint/parser": "^5.57.0",
-    "cypress": "^12.17.4",
-    "cypress-image-snapshot": "^4.0.1",
+    "cypress": "^13.8.1",
+    "cypress-image-snapshot": "^3.1.1",
     "eslint": "^8.37.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-prettier": "^4.2.1",
@@ -80,6 +80,6 @@
     "typescript": "^5.0.4"
   },
   "dependencies": {
-    "wavesurfer.js": "^7.7.10"
+    "wavesurfer.js": "^7.7.12"
   }
 }
