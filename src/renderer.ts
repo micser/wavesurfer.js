@@ -261,7 +261,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     return this.scrollContainer.scrollLeft
   }
 
-  private setScroll(pixels: number) {
+  setScroll(pixels: number) {
     this.scrollContainer.scrollLeft = pixels
   }
 
@@ -532,7 +532,9 @@ class Renderer extends EventEmitter<RendererEvents> {
     }
 
     // Draw the entire waveform
-    if (!this.isScrollable) {
+    // Note, when the waveform container's width is set to a very large value, then the waveform will not be scrollable.
+    // However, we still want to draw the waveform in chunks for a) performance improvements, and b) so that the canvas never exceeds the browser's maximum canvas width.
+    if (!this.isScrollable && width < Renderer.MAX_CANVAS_WIDTH) {
       draw(0, dataLength)
       return
     }
