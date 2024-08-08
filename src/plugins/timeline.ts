@@ -143,9 +143,38 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
     return 2
   }
 
+  private virtualAppend(start: number, container: HTMLElement, element: HTMLElement) {
+    let wasVisible = false
+
+    const renderIfVisible = (scrollLeft: number, scrollRight: number) => {
+      if (!this.wavesurfer) return
+      const width = element.clientWidth
+      const isVisible = start > scrollLeft && start + width < scrollRight
+
+      if (isVisible === wasVisible) return
+      wasVisible = isVisible
+
+      if (isVisible) {
+        container.appendChild(element)
+      } else {
+        element.remove()
+      }
+    }
+
+    setTimeout(() => {
+      if (!this.wavesurfer) return
+      renderIfVisible(0, this.wavesurfer?.getWidth() || 0)
+      this.subscriptions.push(
+        this.wavesurfer.on('scroll', (_start, _end, scrollLeft, scrollRight) => {
+          renderIfVisible(scrollLeft, scrollRight)
+        }),
+      )
+    }, 0)
+  }
+
   private initTimeline() {
     const duration = this.wavesurfer?.getDuration() ?? this.options.duration ?? 0
-    const pxPerSec = this.timelineWrapper.scrollWidth / duration
+    const pxPerSec = (this.wavesurfer?.getWrapper().scrollWidth || this.timelineWrapper.scrollWidth) / duration
     const timeInterval = this.options.timeInterval ?? this.defaultTimeInterval(pxPerSec)
     const primaryLabelInterval = this.options.primaryLabelInterval ?? this.defaultPrimaryLabelInterval(pxPerSec)
     const primaryLabelSpacing = this.options.primaryLabelSpacing
@@ -217,8 +246,9 @@ class TimelinePlugin extends BasePlugin<TimelinePluginEvents, TimelinePluginOpti
       const mode = isPrimary ? 'primary' : isSecondary ? 'secondary' : 'tick'
       notch.setAttribute('part', `timeline-notch timeline-notch-${mode}`)
 
-      notch.style.left = `${i * pxPerSec}px`
-      timeline.appendChild(notch)
+      const offset = i * pxPerSec
+      notch.style.left = `${offset}px`
+      this.virtualAppend(offset, timeline, notch)
     }
 
     this.timelineWrapper.innerHTML = ''

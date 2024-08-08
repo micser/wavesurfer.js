@@ -12,12 +12,21 @@ import createElement from '../dom.js'
 export type RegionsPluginOptions = undefined
 
 export type RegionsPluginEvents = BasePluginEvents & {
+  /** When a region is created */
   'region-created': [region: Region]
+  /** When a region is being updated */
+  'region-update': [region: Region, side?: 'start' | 'end']
+  /** When a region is done updating */
   'region-updated': [region: Region]
+  /** When a region is removed */
   'region-removed': [region: Region]
+  /** When a region is clicked */
   'region-clicked': [region: Region, e: MouseEvent]
+  /** When a region is double-clicked */
   'region-double-clicked': [region: Region, e: MouseEvent]
+  /** When playback enters a region */
   'region-in': [region: Region]
+  /** When playback leaves a region */
   'region-out': [region: Region]
 }
 
@@ -65,7 +74,7 @@ export type RegionParams = {
   contentEditable?: boolean
 }
 
-class SingleRegion extends EventEmitter<RegionEvents> {
+class SingleRegion extends EventEmitter<RegionEvents> implements Region {
   public element: HTMLElement
   public id: string
   public start: number
@@ -467,24 +476,26 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
   private avoidOverlapping(region: Region) {
     if (!region.content) return
 
-    // Check that the label doesn't overlap with other labels
-    // If it does, push it down until it doesn't
-    const div = region.content as HTMLElement
-    const box = div.getBoundingClientRect()
+    setTimeout(() => {
+      // Check that the label doesn't overlap with other labels
+      // If it does, push it down until it doesn't
+      const div = region.content as HTMLElement
+      const box = div.getBoundingClientRect()
 
-    const overlap = this.regions
-      .map((reg) => {
-        if (reg === region || !reg.content) return 0
+      const overlap = this.regions
+        .map((reg) => {
+          if (reg === region || !reg.content) return 0
 
-        const otherBox = reg.content.getBoundingClientRect()
-        if (box.left < otherBox.left + otherBox.width && otherBox.left < box.left + box.width) {
-          return otherBox.height
-        }
-        return 0
-      })
-      .reduce((sum, val) => sum + val, 0)
+          const otherBox = reg.content.getBoundingClientRect()
+          if (box.left < otherBox.left + otherBox.width && otherBox.left < box.left + box.width) {
+            return otherBox.height
+          }
+          return 0
+        })
+        .reduce((sum, val) => sum + val, 0)
 
-    div.style.marginTop = `${overlap}px`
+      div.style.marginTop = `${overlap}px`
+    }, 10)
   }
 
   private adjustScroll(region: Region) {
@@ -503,8 +514,37 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     }
   }
 
+  private virtualAppend(region: Region, container: HTMLElement, element: HTMLElement) {
+    const renderIfVisible = () => {
+      if (!this.wavesurfer) return
+      const clientWidth = this.wavesurfer.getWidth()
+      const scrollLeft = this.wavesurfer.getScroll()
+      const scrollWidth = container.clientWidth
+      const duration = this.wavesurfer.getDuration()
+      const start = Math.round((region.start / duration) * scrollWidth)
+      const width = Math.round(((region.end - region.start) / duration) * scrollWidth) || 1
+
+      // Check if the region is between the scrollLeft and scrollLeft + clientWidth
+      const isVisible = start + width > scrollLeft && start < scrollLeft + clientWidth
+
+      if (isVisible) {
+        container.appendChild(element)
+      } else {
+        element.remove()
+      }
+    }
+
+    setTimeout(() => {
+      if (!this.wavesurfer) return
+      renderIfVisible()
+
+      const unsubscribe = this.wavesurfer.on('scroll', renderIfVisible)
+      this.subscriptions.push(region.once('remove', unsubscribe), unsubscribe)
+    }, 0)
+  }
+
   private saveRegion(region: Region) {
-    this.regionsContainer.appendChild(region.element)
+    this.virtualAppend(region, this.regionsContainer, region.element)
     this.avoidOverlapping(region)
     this.regions.push(region)
 
@@ -514,6 +554,7 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
         if (!side) {
           this.adjustScroll(region)
         }
+        this.emit('region-update', region, side)
       }),
 
       region.on('update-end', () => {
@@ -647,5 +688,4 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
 }
 
 export default RegionsPlugin
-
-export type Region = InstanceType<typeof SingleRegion>
+export type Region = SingleRegion

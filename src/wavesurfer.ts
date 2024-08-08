@@ -133,7 +133,7 @@ export type WaveSurferEvents = {
   /** When the user ends dragging the cursor */
   dragend: [relativeX: number]
   /** When the waveform is scrolled (panned) */
-  scroll: [visibleStartTime: number, visibleEndTime: number]
+  scroll: [visibleStartTime: number, visibleEndTime: number, scrollLeft: number, scrollRight: number]
   /** When the zoom level changes */
   zoom: [minPxPerSec: number]
   /** Just before the waveform is destroyed so you can clean up your events */
@@ -151,6 +151,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   protected subscriptions: Array<() => void> = []
   protected mediaSubscriptions: Array<() => void> = []
   protected abortController: AbortController | null = null
+  private renderDummy: boolean = false
 
   public static readonly BasePlugin = BasePlugin
   public static readonly dom = dom
@@ -184,17 +185,20 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.initTimerEvents()
     this.initPlugins()
 
+    // Read the initial URL before load has been called
+    const initialUrl = this.options.url || this.getSrc() || ''
+
     // Init and load async to allow external events to be registered
     Promise.resolve().then(() => {
       this.emit('init')
 
       // Load audio if URL or an external media with an src is passed,
       // of render w/o audio if pre-decoded peaks and duration are provided
-      const url = this.options.url || this.getSrc() || ''
-      if (url || (this.options.peaks && this.options.duration)) {
+      const { peaks, duration } = this.options
+      if (initialUrl || (peaks && duration)) {
         // Swallow async errors because they cannot be caught from a constructor call.
         // Subscribe to the wavesurfer's error event to handle them.
-        this.load(url, this.options.peaks, this.options.duration).catch(() => null)
+        this.load(initialUrl, peaks, duration).catch(() => null)
       }
     })
   }
@@ -274,9 +278,9 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       }),
 
       // Scroll
-      this.renderer.on('scroll', (startX, endX) => {
+      this.renderer.on('scroll', (startX, endX, scrollLeft, scrollRight) => {
         const duration = this.getDuration()
-        this.emit('scroll', startX * duration, endX * duration)
+        this.emit('scroll', startX * duration, endX * duration, scrollLeft, scrollRight)
       }),
 
       // Redraw
@@ -379,6 +383,11 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     return this.renderer.getWrapper()
   }
 
+  /** For plugins only: get the scroll container client width */
+  public getWidth(): number {
+    return this.renderer.getWidth()
+  }
+
   /** Get the current scroll position in pixels */
   public getScroll(): number {
     return this.renderer.getScroll()
@@ -412,7 +421,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       const fetchParams = this.options.fetchParams || {}
       if (window.AbortController && !fetchParams.signal) {
         this.abortController = new AbortController()
-        fetchParams.signal = this.abortController?.signal;
+        fetchParams.signal = this.abortController?.signal
       }
       const onProgress = (percentage: number) => this.emit('loading', percentage)
       blob = await Fetcher.fetchBlob(url, onProgress, fetchParams)
@@ -422,12 +431,16 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.setSrc(url, blob)
 
     // Wait for the audio duration
-    const audioDuration =
-      duration ||
-      this.getDuration() ||
-      (await new Promise((resolve) => {
-        this.onMediaEvent('loadedmetadata', () => resolve(this.getDuration()), { once: true })
-      }))
+    const audioDuration = await new Promise<number>((resolve) => {
+      const staticDuration = duration || this.getDuration()
+      if (staticDuration) {
+        resolve(staticDuration)
+      } else {
+        this.mediaSubscriptions.push(
+          this.onMediaEvent('loadedmetadata', () => resolve(this.getDuration()), { once: true }),
+        )
+      }
+    })
 
     // Set the duration if the player is a WebAudioPlayer without a URL
     if (!url && !blob) {
@@ -456,6 +469,8 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     if (this.decodedData) {
       this.emit('decode', this.getDuration())
       this.renderer.render(this.decodedData)
+    } else if (this.renderDummy) {
+      this.renderer.renderDummyWaveform()
     }
 
     this.emit('ready', this.getDuration())
@@ -474,7 +489,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   /** Load an audio blob */
   public async loadBlob(blob: Blob, channelData?: WaveSurferOptions['peaks'], duration?: number) {
     try {
-      return await this.loadAudio('blob', blob, channelData, duration)
+      return await this.loadAudio('', blob, channelData, duration)
     } catch (err) {
       this.emit('error', err as Error)
       throw err
@@ -505,9 +520,9 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     for (let i = 0; i < maxChannels; i++) {
       const channel = this.decodedData.getChannelData(i)
       const data = []
-      const sampleSize = Math.round(channel.length / maxLength)
+      const sampleSize = channel.length / maxLength
       for (let i = 0; i < maxLength; i++) {
-        const sample = channel.slice(i * sampleSize, (i + 1) * sampleSize)
+        const sample = channel.slice(Math.floor(i * sampleSize), Math.ceil((i + 1) * sampleSize))
         let max = 0
         for (let x = 0; x < sample.length; x++) {
           const n = sample[x]

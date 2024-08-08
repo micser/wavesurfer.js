@@ -1,6 +1,6 @@
 {
   "name": "wavesurfer.js",
-  "version": "7.7.12",
+  "version": "7.8.2",
   "license": "BSD-3-Clause",
   "author": "katspaugh",
   "description": "Audio waveform player",
@@ -43,7 +43,9 @@
       "require": "./dist/plugins/*.cjs"
     },
     "./dist/*": {
-      "import": "./dist/*"
+      "import": "./dist/*",
+      "types": "./dist/*.d.ts",
+      "require": "./dist/*.cjs"
     },
     "./dist/plugins/*.esm.js": {
       "import": "./dist/plugins/*.esm.js",
@@ -52,10 +54,12 @@
     }
   },
   "scripts": {
+    "clean": "node ./scripts/clean.cjs",
     "build:dev": "tsc -w --target ESNext",
-    "build": "rm -rf dist && tsc && rollup -c",
+    "build": "npm run clean && tsc && rollup -c",
     "prepublishOnly": "npm run build",
     "lint": "eslint --ext .ts src --fix",
+    "lint:report": "eslint --output-file eslint_report.json --format json --ext .ts src",
     "prettier": "prettier -w '**/*.{js,ts,css}' --ignore-path .gitignore",
     "make-plugin": "./scripts/plugin.sh",
     "cypress": "cypress open --e2e",
@@ -65,21 +69,18 @@
     "start": "npm run build:dev & npm run serve"
   },
   "devDependencies": {
-    "@rollup/plugin-terser": "^0.4.3",
-    "@rollup/plugin-typescript": "^11.1.2",
-    "@typescript-eslint/eslint-plugin": "^5.57.0",
-    "@typescript-eslint/parser": "^5.57.0",
-    "cypress": "^13.8.1",
-    "cypress-image-snapshot": "^3.1.1",
-    "eslint": "^8.37.0",
-    "eslint-config-prettier": "^8.8.0",
-    "eslint-plugin-prettier": "^4.2.1",
-    "prettier": "^2.8.7",
-    "rollup": "^3.26.2",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@typescript-eslint/eslint-plugin": "^7.8.0",
+    "@typescript-eslint/parser": "^7.8.0",
+    "cypress": "^13.9.0",
+    "cypress-image-snapshot": "^4.0.1",
+    "eslint": "^8",
+    "eslint-config-prettier": "^8",
+    "eslint-plugin-prettier": "^4",
+    "prettier": "^2",
+    "rollup": "^4.17.2",
     "rollup-plugin-dts": "^6.1.0",
-    "typescript": "^5.0.4"
-  },
-  "dependencies": {
-    "wavesurfer.js": "^7.7.12"
+    "typescript": "^5.4.5"
   }
 }
