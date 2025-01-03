@@ -250,6 +250,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       }),
 
       this.onMediaEvent('ended', () => {
+        this.emit('timeupdate', this.getDuration())
         this.emit('finish')
       }),
 
@@ -258,7 +259,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       }),
 
       this.onMediaEvent('error', (err) => {
-        this.emit('error', err.error)
+        this.emit('error', (this.getMediaElement().error ?? new Error('Media error')) as Error)
       }),
     )
   }

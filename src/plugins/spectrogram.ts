@@ -121,7 +121,7 @@ function FFT(bufferSize: number, sampleRate: number, windowFunc: string, alpha: 
     this.cosTable[i] = Math.cos(-Math.PI / i)
   }
 
-  this.calculateSpectrum = function (buffer) {
+  this.calculateSpectrum = function (buffer: Float32Array): Float32Array {
     // Locally scope variables for speed up
     var bufferSize = this.bufferSize,
       cosTable = this.cosTable,
@@ -211,6 +211,14 @@ function FFT(bufferSize: number, sampleRate: number, windowFunc: string, alpha: 
   }
 }
 
+// Add typings for FFT
+declare class FFT {
+  constructor(bufferSize: number, sampleRate: number, windowFunc: string, alpha: number)
+  calculateSpectrum(buffer: Float32Array): Float32Array
+}
+
+const ERB_A = (1000 * Math.log(10)) / (24.7 * 4.37)
+
 /**
  * Spectrogram plugin for wavesurfer.
  */
@@ -247,14 +255,17 @@ export type SpectrogramPluginOptions = {
   alpha?: number
   /** Min frequency to scale spectrogram. */
   frequencyMin?: number
-  /** Max frequency to scale spectrogram. Set this to samplerate/2 to draw whole range of spectrogram. */
+  /** Max frequency to scale spectrogram. Set this to samplerate/4 to draw whole range of spectrogram. */
   frequencyMax?: number
   /**
    * Based on: https://manual.audacityteam.org/man/spectrogram_settings.html
    * - Linear: Linear The linear vertical scale goes linearly from 0 kHz to 20 kHz frequency by default.
+   * - Logarithmic: This view is the same as the linear view except that the vertical scale is logarithmic.
    * - Mel: The name Mel comes from the word melody to indicate that the scale is based on pitch comparisons. This is the default scale.
+   * - Bark: This is a psychoacoustical scale based on subjective measurements of loudness. It is related to, but somewhat less popular than, the Mel scale.
+   * - ERB: The Equivalent Rectangular Bandwidth scale or ERB is a measure used in psychoacoustics, which gives an approximation to the bandwidths of the filters in human hearing
    */
-  scale?: 'linear' | 'mel'
+  scale?: 'linear' | 'logarithmic' | 'mel' | 'bark' | 'erb'
   /**
    * Increases / decreases the brightness of the display.
    * For small signals where the display is mostly "blue" (dark) you can increase this value to see brighter colors and give more detail.
@@ -288,6 +299,28 @@ export type SpectrogramPluginEvents = BasePluginEvents & {
 }
 
 class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramPluginOptions> {
+  private frequenciesDataUrl?: string
+  private container: HTMLElement
+  private wrapper: HTMLElement
+  private labelsEl: HTMLCanvasElement
+  private canvas: HTMLCanvasElement
+  private spectrCc: CanvasRenderingContext2D
+  private colorMap: SpectrogramPluginOptions['colorMap']
+  private fftSamples: SpectrogramPluginOptions['fftSamples']
+  private height: SpectrogramPluginOptions['height']
+  private noverlap: SpectrogramPluginOptions['noverlap']
+  private windowFunc: SpectrogramPluginOptions['windowFunc']
+  private alpha: SpectrogramPluginOptions['alpha']
+  private frequencyMin: SpectrogramPluginOptions['frequencyMin']
+  private frequencyMax: SpectrogramPluginOptions['frequencyMax']
+  private gainDB: SpectrogramPluginOptions['gainDB']
+  private rangeDB: SpectrogramPluginOptions['rangeDB']
+  private scale: SpectrogramPluginOptions['scale']
+  private numMelFilters: number
+  private numLogFilters: number
+  private numBarkFilters: number
+  private numErbFilters: number
+
   static create(options?: SpectrogramPluginOptions) {
     return new SpectrogramPlugin(options || {})
   }
@@ -336,7 +369,8 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
       }
     }
     this.fftSamples = options.fftSamples || 512
-    this.noverlap = options.noverlap || this.fftSamples * 0.75
+    this.height = options.height || 200
+    this.noverlap = options.noverlap || null // Will be calculated later based on canvas size
     this.windowFunc = options.windowFunc || 'hann'
     this.alpha = options.alpha
 
@@ -345,17 +379,13 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     this.frequencyMin = options.frequencyMin || 0
     this.frequencyMax = options.frequencyMax || 0
 
-    this.gainDB = options.gainDB || 20
-    this.rangeDB = options.rangeDB || 80
+    this.gainDB = options.gainDB ?? 20
+    this.rangeDB = options.rangeDB ?? 80
     this.scale = options.scale || 'mel'
-    this.numMelFilters = options.numMelFilters || this.fftSamples / 8
-    if (this.scale == 'mel') {
-        this.height = options.height || this.numMelFilters
-        this.height = Math.min(this.height, this.numMelFilters)
-    } else {
-        this.height = options.height || this.fftSamples / 2
-        this.height =  Math.min(this.height, this.fftSamples / 2)
-    }
+    this.numMelFilters = this.fftSamples / 4
+    this.numLogFilters = this.fftSamples / 8
+    this.numBarkFilters = this.fftSamples / 8
+    this.numErbFilters = this.fftSamples / 8
 
     this.createWrapper()
     this.createCanvas()
@@ -456,7 +486,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     }
   }
 
-  private drawSpectrogram(frequenciesData) {
+  private drawSpectrogram(frequenciesData: Uint8Array[][]): void {
     if (!isNaN(frequenciesData[0][0])) {
       // data is 1ch [sample, freq] format
       // to [channel, sample, freq] format
@@ -466,13 +496,12 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     // Set the height to fit all channels
     this.wrapper.style.height = this.height * frequenciesData.length + 'px'
 
-    this.width = this.wavesurfer.getWrapper().offsetWidth
-    this.canvas.width = this.width
+    this.canvas.width = this.getWidth()
     this.canvas.height = this.height * frequenciesData.length
 
     const spectrCc = this.spectrCc
     const height = this.height
-    const width = this.width
+    const width = this.getWidth()
     const freqFrom = this.buffer.sampleRate / 2
     const freqMin = this.frequencyMin
     const freqMax = this.frequencyMax
@@ -484,12 +513,13 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     for (let c = 0; c < frequenciesData.length; c++) {
       // for each channel
       const pixels = this.resample(frequenciesData[c])
-      const imageData = new ImageData(width, height)
+      const bitmapHeight = pixels[0].length
+      const imageData = new ImageData(width, bitmapHeight)
 
       for (let i = 0; i < pixels.length; i++) {
         for (let j = 0; j < pixels[i].length; j++) {
           const colorMap = this.colorMap[pixels[i][j]]
-          const redIndex = ((height - j) * width + i) * 4
+          const redIndex = ((bitmapHeight / 2 - j) * width + i) * 4
           imageData.data[redIndex] = colorMap[0] * 255
           imageData.data[redIndex + 1] = colorMap[1] * 255
           imageData.data[redIndex + 2] = colorMap[2] * 255
@@ -498,18 +528,14 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
       }
 
       // scale and stack spectrograms
-      createImageBitmap(imageData).then((renderer) => {
-        spectrCc.drawImage(
-          renderer,
-          0,
-          height * (1 - freqMax / freqFrom), // source x, y
-          width,
-          (height * (freqMax - freqMin)) / freqFrom, // source width, height
-          0,
-          height * c, // destination x, y
-          width,
-          height, // destination width, height
-        )
+      createImageBitmap(
+        imageData,
+        0,
+        Math.round(bitmapHeight - bitmapHeight * (freqMax / freqFrom)) / 2,
+        width,
+        Math.round(bitmapHeight * ((freqMax - freqMin) / freqFrom)),
+      ).then((bitmap) => {
+        spectrCc.drawImage(bitmap, 0, height * c, width, height * 2)
       })
     }
 
@@ -530,43 +556,105 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
     this.emit('ready')
   }
 
-  private hzToMel(hz) { return 2595 * Math.log10(1 + hz / 700) }
-
-  private melToHz(mel) { return 700 * (Math.pow(10, mel / 2595) - 1) }
-
-  private createMelFilterBank(numMelFilters, sampleRate) {
-    const melMin = this.hzToMel(0)
-    const melMax = this.hzToMel(sampleRate / 2)
-    const melFilterBank = Array.from({ length: numMelFilters }, () => Array(this.fftSamples / 2 + 1).fill(0))
+  private createFilterBank(
+    numFilters: number,
+    sampleRate: number,
+    hzToScale: (hz: number) => number,
+    scaleToHz: (scale: number) => number,
+  ): number[][] {
+    const filterMin = hzToScale(0)
+    const filterMax = hzToScale(sampleRate / 2)
+    const filterBank = Array.from({ length: numFilters }, () => Array(this.fftSamples / 2 + 1).fill(0))
     const scale = (sampleRate / this.fftSamples)
-    for (let i = 0; i < numMelFilters; i++) {
-        let hz = this.melToHz(melMin + (i / numMelFilters) * (melMax - melMin))
+    for (let i = 0; i < numFilters; i++) {
+        let hz = scaleToHz(filterMin + (i / numFilters) * (filterMax - filterMin))
         let j = Math.floor(hz / scale)
         let hzLow = j * scale
         let hzHigh = (j + 1) * scale
         let r = (hz - hzLow) / (hzHigh - hzLow)
-        melFilterBank[i][j] = 1 - r
-        melFilterBank[i][j + 1] = r
+        filterBank[i][j] = 1 - r
+        filterBank[i][j + 1] = r
     }
-    return melFilterBank
+    return filterBank
   }
 
-  private applyMelFilterBank(fftPoints, melFilterBank) {
-    const numFilters = melFilterBank.length
-    const melSpectrum = Array(numFilters).fill(0)
+  private hzToMel(hz: number) { return 2595 * Math.log10(1 + hz / 700) }
+
+  private melToHz(mel: number) { return 700 * (Math.pow(10, mel / 2595) - 1) }
+
+  private createMelFilterBank(numMelFilters: number, sampleRate: number): number[][] {
+    return this.createFilterBank(numMelFilters, sampleRate, this.hzToMel, this.melToHz)
+  }
+
+  private hzToLog(hz: number) { return Math.log10(Math.max(1, hz)) }
+
+  private logToHz(log: number) { return Math.pow(10, log) }
+
+  private createLogFilterBank(numLogFilters: number, sampleRate: number): number[][] {
+    return this.createFilterBank(numLogFilters, sampleRate, this.hzToLog, this.logToHz)
+  }
+
+  private hzToBark(hz: number) {
+    // https://www.mathworks.com/help/audio/ref/hz2bark.html#function_hz2bark_sep_mw_06bea6f7-353b-4479-a58d-ccadb90e44de
+    let bark = (26.81 * hz) / (1960 + hz) - 0.53
+    if (bark < 2) {
+      bark += 0.15 * (2 - bark)
+    }
+    if (bark > 20.1) {
+      bark += 0.22 * (bark - 20.1)
+    }
+    return bark
+  }
+
+  private barkToHz(bark: number) {
+    // https://www.mathworks.com/help/audio/ref/bark2hz.html#function_bark2hz_sep_mw_bee310ea-48ac-4d95-ae3d-80f3e4149555
+    if (bark < 2) {
+      bark = (bark - 0.3) / 0.85
+    }
+    if (bark > 20.1) {
+      bark = (bark + 4.422) / 1.22
+    }
+    return 1960 * ((bark + 0.53) / (26.28 - bark))
+  }
+
+  private createBarkFilterBank(numBarkFilters: number, sampleRate: number): number[][] {
+    return this.createFilterBank(numBarkFilters, sampleRate, this.hzToBark, this.barkToHz)
+  }
+
+  private hzToErb(hz: number) {
+    // https://www.mathworks.com/help/audio/ref/hz2erb.html#function_hz2erb_sep_mw_06bea6f7-353b-4479-a58d-ccadb90e44de
+    return ERB_A * Math.log10(1 + hz * 0.00437)
+  }
+
+  private erbToHz(erb: number) {
+    // https://it.mathworks.com/help/audio/ref/erb2hz.html?#function_erb2hz_sep_mw_bee310ea-48ac-4d95-ae3d-80f3e4149555
+    return (Math.pow(10, erb / ERB_A) - 1) / 0.00437
+  }
+
+  private createErbFilterBank(numErbFilters: number, sampleRate: number): number[][] {
+    return this.createFilterBank(numErbFilters, sampleRate, this.hzToErb, this.erbToHz)
+  }
+
+  private applyFilterBank(fftPoints: Float32Array, filterBank: number[][]): Float32Array {
+    const numFilters = filterBank.length
+    const logSpectrum = Float32Array.from({ length: numFilters }, () => 0)
     for (let i = 0; i < numFilters; i++) {
       for (let j = 0; j < fftPoints.length; j++) {
-        melSpectrum[i] += fftPoints[j] * melFilterBank[i][j]
+        logSpectrum[i] += fftPoints[j] * filterBank[i][j]
       }
     }
-    return melSpectrum
+    return logSpectrum
   }
 
-  private getFrequencies(buffer: AudioBuffer): number[] {
+  private getWidth() {
+    return this.wavesurfer.getWrapper().offsetWidth
+  }
+
+  private getFrequencies(buffer: AudioBuffer): Uint8Array[][] {
     const fftSamples = this.fftSamples
     const channels = this.options.splitChannels ?? this.wavesurfer?.options.splitChannels ? buffer.numberOfChannels : 1
 
-    this.frequencyMax = this.frequencyMax || buffer.sampleRate / 2
+    this.frequencyMax = this.frequencyMax || buffer.sampleRate / 4
 
     if (!buffer) return
 
@@ -574,7 +662,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
 
     // This may differ from file samplerate. Browser resamples audio.
     const sampleRate = buffer.sampleRate
-    const frequencies = []
+    const frequencies: Uint8Array[][] = []
 
     let noverlap = this.noverlap
     if (!noverlap) {
@@ -584,25 +672,40 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
 
     const fft = new FFT(fftSamples, sampleRate, this.windowFunc, this.alpha)
 
-    const melFilterBank = this.createMelFilterBank(this.numMelFilters, sampleRate);
+    let filterBank: number[][]
+    switch (this.scale) {
+      case 'mel':
+        filterBank = this.createFilterBank(this.numMelFilters, sampleRate, this.hzToMel, this.melToHz)
+        break;
+      case 'logarithmic':
+        filterBank = this.createFilterBank(this.numLogFilters, sampleRate, this.hzToLog, this.logToHz)
+        break;
+      case 'bark':
+        filterBank = this.createFilterBank(this.numBarkFilters, sampleRate, this.hzToBark, this.barkToHz)
+        break;
+      case 'erb':
+        filterBank = this.createFilterBank(this.numErbFilters, sampleRate, this.hzToErb, this.erbToHz)
+        break;
+    }
 
     for (let c = 0; c < channels; c++) {
       // for each channel
       const channelData = buffer.getChannelData(c)
-      const channelFreq = []
+      const channelFreq: Uint8Array[] = []
       let currentOffset = 0
 
       while (currentOffset + fftSamples < channelData.length) {
         const segment = channelData.slice(currentOffset, currentOffset + fftSamples)
         const array = new Uint8Array(fftSamples / 2)
         let spectrum = fft.calculateSpectrum(segment);
-        if (this.scale == 'mel') {
-          spectrum = this.applyMelFilterBank(spectrum, melFilterBank);
+        if (filterBank) {
+          spectrum = this.applyFilterBank(spectrum, filterBank)
         }
         for (let j = 0; j < fftSamples / 2; j++) {
           // Based on: https://manual.audacityteam.org/man/spectrogram_view.html
-          let valueDB = 20 * Math.log10(spectrum[j])
-          if (valueDB < -this.rangeDB) {
+          const magnitude = spectrum[j] > 1e-12 ? spectrum[j] : 1e-12
+          const valueDB = 20 * Math.log10(magnitude)
+          if (valueDB < -this.gainDB - this.rangeDB) {
             array[j] = 0
           } else if (valueDB > -this.gainDB) {
             array[j] = 255
@@ -628,6 +731,17 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
 
   private unitType(freq) {
     return freq >= 1000 ? 'KHz' : 'Hz'
+  }
+
+  private getLabelFrequency(
+    index: number,
+    labelIndex: number,
+    hzToScale: (hz: number) => number,
+    scaleToHz: (scale: number) => number,
+  ) {
+    const scaleMin = hzToScale(0)
+    const scaleMax = hzToScale(this.frequencyMax)
+    return scaleToHz(scaleMin + (index / labelIndex) * (scaleMax - scaleMin))
   }
 
   private loadLabels(
@@ -680,21 +794,33 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
         ctx.textAlign = textAlign
         ctx.textBaseline = 'middle'
 
-        const freq = freqStart + step * i
+        let freq
+        switch (this.scale) {
+          case 'mel':
+            freq = this.getLabelFrequency(i, labelIndex, this.hzToMel, this.melToHz)
+            break
+          case 'logarithmic':
+            freq = this.getLabelFrequency(i, labelIndex, this.hzToLog, this.logToHz)
+            break
+          case 'bark':
+            freq = this.getLabelFrequency(i, labelIndex, this.hzToBark, this.barkToHz)
+            break
+          case 'erb':
+            freq = this.getLabelFrequency(i, labelIndex, this.hzToErb, this.erbToHz)
+            break
+          default:
+            freq = freqStart + step * i
+            break
+        }
+
         const label = this.freqType(freq)
         const units = this.unitType(freq)
-        const yLabelOffset = 2
         const x = 16
-        let y
+        let y = (1 + c) * getMaxY - (i / labelIndex) * getMaxY
 
-        if (i == 0) {
-          y = (1 + c) * getMaxY + i - 10
-        } else {
-          y = (1 + c) * getMaxY - i * 50 + yLabelOffset
-        }
-        if (this.scale == 'mel' && freq != 0) {
-          y = y * this.hzToMel(freq) / freq
-        }
+        // Make sure label remains in view
+        y = Math.min(Math.max(y, c * getMaxY + 10), (1 + c) * getMaxY - 10)
+
         // unit label
         ctx.fillStyle = textColorUnit
         ctx.font = fontSizeUnit + ' ' + fontType
@@ -708,7 +834,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
   }
 
   private resample(oldMatrix) {
-    const columnsNumber = this.width
+    const columnsNumber = this.getWidth()
     const newMatrix = []
 
     const oldPiece = 1 / oldMatrix.length
