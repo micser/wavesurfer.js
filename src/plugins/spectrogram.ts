@@ -291,6 +291,8 @@ export type SpectrogramPluginOptions = {
   | 'roseus'
   /** Render a spectrogram for each channel independently when true. */
   splitChannels?: boolean
+  /** URL with pre-computed spectrogram JSON data, the data must be a Uint8Array[][] **/
+  frequenciesDataUrl?: string
 }
 
 export type SpectrogramPluginEvents = BasePluginEvents & {
@@ -730,7 +732,7 @@ class SpectrogramPlugin extends BasePlugin<SpectrogramPluginEvents, SpectrogramP
   }
 
   private unitType(freq) {
-    return freq >= 1000 ? 'KHz' : 'Hz'
+    return freq >= 1000 ? 'kHz' : 'Hz'
   }
 
   private getLabelFrequency(
