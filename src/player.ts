@@ -72,6 +72,12 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
     if (url && src === url) return
     this.revokeSrc()
     const newSrc = blob instanceof Blob && (this.canPlayType(blob.type) || !url) ? URL.createObjectURL(blob) : url
+
+    // Reset the media element, otherwise it keeps the previous source
+    if (src) {
+      this.media.src = ''
+    }
+
     try {
       this.media.src = newSrc
     } catch (e) {
@@ -80,9 +86,8 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
   }
 
   protected destroy() {
-    this.media.pause()
-
     if (this.isExternalMedia) return
+    this.media.pause()
     this.media.remove()
     this.revokeSrc()
     this.media.src = ''
@@ -111,7 +116,7 @@ class Player<T extends GeneralEventTypes> extends EventEmitter<T> {
 
   /** Jump to a specific time in the audio (in seconds) */
   public setTime(time: number) {
-    this.media.currentTime = time
+    this.media.currentTime = Math.max(0, Math.min(time, this.getDuration()))
   }
 
   /** Get the duration of the audio in seconds */
