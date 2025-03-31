@@ -597,6 +597,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       this.setTime(start)
     }
 
+    const playResult = await super.play()
     if (end != null) {
       if (this.media instanceof WebAudioPlayer) {
         this.media.stopAt(end)
@@ -605,7 +606,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
       }
     }
 
-    return super.play()
+    return playResult
   }
 
   /** Play or pause the audio */
