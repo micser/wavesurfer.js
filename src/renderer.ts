@@ -529,9 +529,6 @@ class Renderer extends EventEmitter<RendererEvents> {
     let singleCanvasWidth = Math.min(Renderer.MAX_CANVAS_WIDTH, clientWidth, totalWidth)
     let drawnIndexes: Record<number, boolean> = {}
 
-    // Nothing to render
-    if (singleCanvasWidth === 0) return
-
     // Adjust width to avoid gaps between canvases when using bars
     if (options.barWidth || options.barGap) {
       const barWidth = options.barWidth || 0.5
@@ -542,13 +539,25 @@ class Renderer extends EventEmitter<RendererEvents> {
       }
     }
 
+    // Nothing to render
+    if (singleCanvasWidth === 0) return
+
     // Draw a single canvas
     const draw = (index: number) => {
       if (index < 0 || index >= numCanvases) return
       if (drawnIndexes[index]) return
       drawnIndexes[index] = true
       const offset = index * singleCanvasWidth
-      const clampedWidth = Math.min(totalWidth - offset, singleCanvasWidth)
+      let clampedWidth = Math.min(totalWidth - offset, singleCanvasWidth)
+
+      // Clamp the width to the bar grid to avoid empty canvases at the end
+      if (options.barWidth || options.barGap) {
+        const barWidth = options.barWidth || 0.5
+        const barGap = options.barGap || barWidth / 2
+        const totalBarWidth = barWidth + barGap
+        clampedWidth = Math.floor(clampedWidth / totalBarWidth) * totalBarWidth
+      }
+
       if (clampedWidth <= 0) return
       const data = channelData.map((channel) => {
         const start = Math.floor((offset / totalWidth) * channel.length)
@@ -771,7 +780,7 @@ class Renderer extends EventEmitter<RendererEvents> {
   renderProgress(progress: number, isPlaying?: boolean) {
     if (isNaN(progress)) return
     const percents = progress * 100
-    this.canvasWrapper.style.clipPath = `polygon(${percents}% 0, 100% 0, 100% 100%, ${percents}% 100%)`
+    this.canvasWrapper.style.clipPath = `polygon(${percents}% 0%, 100% 0%, 100% 100%, ${percents}% 100%)`
     this.progressWrapper.style.width = `${percents}%`
     this.cursor.style.left = `${percents}%`
     this.cursor.style.transform = `translateX(-${Math.round(percents) === 100 ? this.options.cursorWidth : 0}px)`
@@ -799,7 +808,11 @@ class Renderer extends EventEmitter<RendererEvents> {
         return new Promise<Blob>((resolve, reject) => {
           canvas.toBlob(
             (blob) => {
-              blob ? resolve(blob) : reject(new Error('Could not export image'))
+              if (blob) {
+                resolve(blob)
+              } else {
+                reject(new Error('Could not export image'))
+              }
             },
             format,
             quality,
