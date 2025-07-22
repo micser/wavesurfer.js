@@ -589,11 +589,14 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     }
 
     setTimeout(() => {
-      if (!this.wavesurfer) return
+      if (!this.wavesurfer || !region.element) return
       renderIfVisible()
 
-      const unsubscribe = this.wavesurfer.on('scroll', renderIfVisible)
-      this.subscriptions.push(region.once('remove', unsubscribe), unsubscribe)
+      const unsubscribeScroll = this.wavesurfer.on('scroll', renderIfVisible)
+      const unsubscribeZoom = this.wavesurfer.on('zoom', renderIfVisible)
+
+      this.subscriptions.push(region.once('remove', unsubscribeScroll), unsubscribeScroll)
+      this.subscriptions.push(region.once('remove', unsubscribeZoom), unsubscribeZoom)
     }, 0)
   }
 
