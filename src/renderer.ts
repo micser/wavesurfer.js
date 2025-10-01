@@ -32,6 +32,7 @@ class Renderer extends EventEmitter<RendererEvents> {
   private isDragging = false
   private subscriptions: (() => void)[] = []
   private unsubscribeOnScroll: (() => void)[] = []
+  private dragUnsubscribe: (() => void) | null = null
 
   constructor(options: WaveSurferOptions, audioElement?: HTMLElement) {
     super()
@@ -128,25 +129,28 @@ class Renderer extends EventEmitter<RendererEvents> {
   }
 
   private initDrag() {
-    this.subscriptions.push(
-      makeDraggable(
-        this.wrapper,
-        // On drag
-        (_, __, x) => {
-          this.emit('drag', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
-        },
-        // On start drag
-        (x) => {
-          this.isDragging = true
-          this.emit('dragstart', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
-        },
-        // On end drag
-        (x) => {
-          this.isDragging = false
-          this.emit('dragend', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
-        },
-      ),
+    // Don't initialize drag if it's already set up
+    if (this.dragUnsubscribe) return
+
+    this.dragUnsubscribe = makeDraggable(
+      this.wrapper,
+      // On drag
+      (_, __, x) => {
+        this.emit('drag', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
+      },
+      // On start drag
+      (x) => {
+        this.isDragging = true
+        this.emit('dragstart', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
+      },
+      // On end drag
+      (x) => {
+        this.isDragging = false
+        this.emit('dragend', Math.max(0, Math.min(1, x / this.wrapper.getBoundingClientRect().width)))
+      },
     )
+
+    this.subscriptions.push(this.dragUnsubscribe)
   }
 
   private getHeight(
@@ -293,30 +297,42 @@ class Renderer extends EventEmitter<RendererEvents> {
   destroy() {
     this.subscriptions.forEach((unsubscribe) => unsubscribe())
     this.container.remove()
-    this.resizeObserver?.disconnect()
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect()
+      this.resizeObserver = null
+    }
     this.unsubscribeOnScroll?.forEach((unsubscribe) => unsubscribe())
     this.unsubscribeOnScroll = []
   }
 
   private createDelay(delayMs = 10): () => Promise<void> {
     let timeout: ReturnType<typeof setTimeout> | undefined
-    let reject: (() => void) | undefined
+    let rejectFn: (() => void) | undefined
 
     const onClear = () => {
-      if (timeout) clearTimeout(timeout)
-      if (reject) reject()
+      if (timeout) {
+        clearTimeout(timeout)
+        timeout = undefined
+      }
+      if (rejectFn) {
+        rejectFn()
+        rejectFn = undefined
+      }
     }
 
     this.timeouts.push(onClear)
 
     return () => {
-      return new Promise((resolveFn, rejectFn) => {
+      return new Promise<void>((resolve, reject) => {
+        // Clear any pending delay
         onClear()
-        reject = rejectFn
+        // Store reject function for cleanup
+        rejectFn = reject
+        // Set new timeout
         timeout = setTimeout(() => {
           timeout = undefined
-          reject = undefined
-          resolveFn()
+          rejectFn = undefined
+          resolve()
         }, delayMs)
       })
     }
@@ -325,6 +341,7 @@ class Renderer extends EventEmitter<RendererEvents> {
   // Convert array of color values to linear gradient
   private convertColorValues(color?: WaveSurferOptions['waveColor']): string | CanvasGradient {
     if (!Array.isArray(color)) return color || ''
+    if (color.length === 0) return '#999' // Return default color for empty array
     if (color.length < 2) return color[0] || ''
 
     const canvasElement = document.createElement('canvas')
@@ -465,7 +482,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     let vScale = options.barHeight || 1
     if (options.normalize) {
       const max = Array.from(channelData[0]).reduce((max, value) => Math.max(max, Math.abs(value)), 0)
-      vScale = max ? 1 / max : 1
+      vScale = max ? vScale / max : vScale
     }
 
     // Render waveform as bars

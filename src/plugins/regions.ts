@@ -19,7 +19,7 @@ export type RegionsPluginEvents = BasePluginEvents & {
   /** When a region is being updated */
   'region-update': [region: Region, side?: UpdateSide]
   /** When a region is done updating */
-  'region-updated': [region: Region]
+  'region-updated': [region: Region, side?: UpdateSide]
   /** When a region is removed */
   'region-removed': [region: Region]
   /** When a region is clicked */
@@ -40,7 +40,7 @@ export type RegionEvents = {
   /** When the region's parameters are being updated */
   update: [side?: UpdateSide]
   /** When dragging or resizing is finished */
-  'update-end': []
+  'update-end': [side?: UpdateSide]
   /** On play */
   play: [end?: number]
   /** On mouse click */
@@ -102,6 +102,8 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
   public subscriptions: (() => void)[] = []
   public updatingSide?: UpdateSide = undefined
   private isRemoved = false
+  private contentClickListener?: (e: MouseEvent) => void
+  private contentBlurListener?: () => void
 
   constructor(
     params: RegionParams,
@@ -186,14 +188,14 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
         leftHandle,
         (dx) => this.onResize(dx, 'start'),
         () => null,
-        () => this.onEndResizing(),
+        () => this.onEndResizing('start'),
         resizeThreshold,
       ),
       makeDraggable(
         rightHandle,
         (dx) => this.onResize(dx, 'end'),
         () => null,
-        () => this.onEndResizing(),
+        () => this.onEndResizing('end'),
         resizeThreshold,
       ),
     )
@@ -218,7 +220,7 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
     let elementTop = 0
     let elementHeight = 100
 
-    if (this.channelIdx >= 0 && this.channelIdx < this.numberOfChannels) {
+    if (this.channelIdx >= 0 && this.numberOfChannels > 0 && this.channelIdx < this.numberOfChannels) {
       elementHeight = 100 / this.numberOfChannels
       elementTop = elementHeight * this.channelIdx
     }
@@ -284,8 +286,10 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
     )
 
     if (this.contentEditable && this.content) {
-      this.content.addEventListener('click', (e) => this.onContentClick(e))
-      this.content.addEventListener('blur', () => this.onContentBlur())
+      this.contentClickListener = (e) => this.onContentClick(e)
+      this.contentBlurListener = () => this.onContentBlur()
+      this.content.addEventListener('click', this.contentClickListener)
+      this.content.addEventListener('blur', this.contentBlurListener)
     }
   }
 
@@ -333,9 +337,9 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
     this._onUpdate(dx, side)
   }
 
-  private onEndResizing() {
+  private onEndResizing(side: UpdateSide) {
     if (!this.resize) return
-    this.emit('update-end')
+    this.emit('update-end', side)
     this.updatingSide = undefined
   }
 
@@ -375,6 +379,16 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
   public setContent(content: RegionParams['content']) {
     if (!this.element) return
 
+    // Remove event listeners from old content before removing it
+    if (this.content && this.contentEditable) {
+      if (this.contentClickListener) {
+        this.content.removeEventListener('click', this.contentClickListener)
+      }
+      if (this.contentBlurListener) {
+        this.content.removeEventListener('blur', this.contentBlurListener)
+      }
+    }
+
     this.content?.remove()
     if (!content) {
       this.content = undefined
@@ -394,6 +408,11 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
     }
     if (this.contentEditable) {
       this.content.contentEditable = 'true'
+      // Re-add event listeners to new content
+      this.contentClickListener = (e) => this.onContentClick(e)
+      this.contentBlurListener = () => this.onContentBlur()
+      this.content.addEventListener('click', this.contentClickListener)
+      this.content.addEventListener('blur', this.contentBlurListener)
     }
     this.content.setAttribute('part', 'region-content')
     this.element.appendChild(this.content)
@@ -608,14 +627,21 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
     }
 
     setTimeout(() => {
+      // Check if region was removed before setTimeout executed
       if (!this.wavesurfer || !region.element) return
       renderIfVisible()
 
       const unsubscribeScroll = this.wavesurfer.on('scroll', renderIfVisible)
       const unsubscribeZoom = this.wavesurfer.on('zoom', renderIfVisible)
 
-      this.subscriptions.push(region.once('remove', unsubscribeScroll), unsubscribeScroll)
-      this.subscriptions.push(region.once('remove', unsubscribeZoom), unsubscribeZoom)
+      // Only push the unsubscribe functions, not the once() return values
+      this.subscriptions.push(unsubscribeScroll, unsubscribeZoom)
+
+      // Clean up subscriptions when region is removed
+      region.once('remove', () => {
+        unsubscribeScroll()
+        unsubscribeZoom()
+      })
     }, 0)
   }
 
@@ -634,9 +660,9 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
         this.emit('region-update', region, side)
       }),
 
-      region.on('update-end', () => {
+      region.on('update-end', (side) => {
         this.avoidOverlapping(region)
-        this.emit('region-updated', region)
+        this.emit('region-updated', region, side)
       }),
 
       region.on('play', (end?: number) => {

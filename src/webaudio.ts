@@ -14,6 +14,10 @@ type WebAudioPlayerEvents = {
 
 /**
  * A Web Audio buffer player emulating the behavior of an HTML5 Audio element.
+ *
+ * Note: This class does not manage blob: URLs. If you pass a blob: URL to setSrc(),
+ * you are responsible for revoking it when done. The Player class (player.ts) handles
+ * blob URL lifecycle management automatically.
  */
 class WebAudioPlayer extends EventEmitter<WebAudioPlayerEvents> {
   private audioContext: AudioContext
@@ -89,7 +93,12 @@ class WebAudioPlayer extends EventEmitter<WebAudioPlayerEvents> {
     if (!this.paused) return
     this.paused = false
 
-    this.bufferNode?.disconnect()
+    // Clean up old buffer node completely before creating new one
+    if (this.bufferNode) {
+      this.bufferNode.onended = null
+      this.bufferNode.disconnect()
+    }
+
     this.bufferNode = this.audioContext.createBufferSource()
     if (this.buffer) {
       this.bufferNode.buffer = this.buffer
