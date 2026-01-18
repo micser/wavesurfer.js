@@ -6,6 +6,8 @@ import Player from './player.js'
 import Renderer from './renderer.js'
 import Timer from './timer.js'
 import WebAudioPlayer from './webaudio.js'
+import { createWaveSurferState, type WaveSurferState, type WaveSurferActions } from './state/wavesurfer-state.js'
+import { setupStateEventEmission } from './reactive/state-event-emitter.js'
 
 export type WaveSurferOptions = {
   /** Required: an HTML element or selector where the waveform will be rendered */
@@ -34,6 +36,8 @@ export type WaveSurferOptions = {
   barHeight?: number
   /** Vertical bar alignment */
   barAlign?: 'top' | 'bottom'
+  /** Minimum height of bars in pixels */
+  barMinHeight?: number
   /** Minimum pixels per second of audio (i.e. the zoom level) */
   minPxPerSec?: number
   /** Stretch the waveform to fill the container, true by default */
@@ -70,6 +74,8 @@ export type WaveSurferOptions = {
   splitChannels?: Array<Partial<WaveSurferOptions> & { overlay?: boolean }>
   /** Stretch the waveform to the full height */
   normalize?: boolean
+  /** Use a fixed max peak value for normalization instead of calculating from the current data */
+  maxPeak?: number
   /** The list of plugins to initialize on start */
   plugins?: GenericPlugin[]
   /** Custom render function */
@@ -145,7 +151,7 @@ export type WaveSurferEvents = {
   /** When source file is unable to be fetched, decoded, or an error is thrown by media element */
   error: [error: Error]
   /** When audio container resizing */
-  resize: [];
+  resize: []
 }
 
 class WaveSurfer extends Player<WaveSurferEvents> {
@@ -160,12 +166,27 @@ class WaveSurfer extends Player<WaveSurferEvents> {
   protected abortController: AbortController | null = null
   private renderDummy: boolean = false
 
+  // Reactive state
+  private wavesurferState: WaveSurferState
+  private wavesurferActions: WaveSurferActions
+  private reactiveCleanups: Array<() => void> = []
+
   public static readonly BasePlugin = BasePlugin
   public static readonly dom = dom
 
   /** Create a new WaveSurfer instance */
   public static create(options: WaveSurferOptions) {
     return new WaveSurfer(options)
+  }
+
+  /** Get the reactive state for advanced use cases */
+  public getState(): WaveSurferState {
+    return this.wavesurferState
+  }
+
+  /** Get the renderer instance for plugin access to reactive streams */
+  public getRenderer(): Renderer {
+    return this.renderer
   }
 
   /** Create a new WaveSurfer instance */
@@ -182,6 +203,20 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     })
 
     this.options = Object.assign({}, defaultOptions, options)
+
+    // Initialize reactive state
+    // Pass Player signals to compose them into WaveSurferState
+    const { state, actions } = createWaveSurferState({
+      isPlaying: this.isPlayingSignal,
+      currentTime: this.currentTimeSignal,
+      duration: this.durationSignal,
+      volume: this.volumeSignal,
+      playbackRate: this.playbackRateSignal,
+      isSeeking: this.seekingSignal,
+    })
+    this.wavesurferState = state
+    this.wavesurferActions = actions
+
     this.timer = new Timer()
 
     const audioElement = media ? undefined : this.getMediaElement()
@@ -190,6 +225,7 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.initPlayerEvents()
     this.initRendererEvents()
     this.initTimerEvents()
+    this.initReactiveState()
     this.initPlugins()
 
     // Read the initial URL before load has been called
@@ -232,6 +268,15 @@ class WaveSurfer extends Player<WaveSurferEvents> {
             this.pause()
           }
         }
+      }),
+    )
+  }
+
+  private initReactiveState() {
+    // Bridge reactive state to EventEmitter for backwards compatibility
+    this.reactiveCleanups.push(
+      setupStateEventEmission(this.wavesurferState, {
+        emit: this.emit.bind(this),
       }),
     )
   }
@@ -325,8 +370,8 @@ class WaveSurfer extends Player<WaveSurferEvents> {
 
       // Resize
       this.renderer.on('resize', () => {
-        this.emit('resize');
-      })
+        this.emit('resize')
+      }),
     )
 
     // Drag
@@ -692,10 +737,16 @@ class WaveSurfer extends Player<WaveSurferEvents> {
     this.plugins.forEach((plugin) => plugin.destroy())
     this.subscriptions.forEach((unsubscribe) => unsubscribe())
     this.unsubscribePlayerEvents()
+    this.reactiveCleanups.forEach((cleanup) => cleanup())
+    this.reactiveCleanups = []
     this.timer.destroy()
     this.renderer.destroy()
     super.destroy()
   }
 }
+
+// Export reactive types for plugin authors
+export type { Signal, WritableSignal } from './reactive/store.js'
+export type { WaveSurferState, WaveSurferActions } from './state/wavesurfer-state.js'
 
 export default WaveSurfer

@@ -1,7 +1,9 @@
-import { makeDraggable } from './draggable.js'
 import EventEmitter from './event-emitter.js'
 import * as utils from './renderer-utils.js'
 import type { WaveSurferOptions } from './wavesurfer.js'
+import { createDragStream } from './reactive/drag-stream.js'
+import { createScrollStream } from './reactive/scroll-stream.js'
+import { effect } from './reactive/store.js'
 
 type ChannelData = utils.ChannelData
 
@@ -34,7 +36,8 @@ class Renderer extends EventEmitter<RendererEvents> {
   private isDragging = false
   private subscriptions: (() => void)[] = []
   private unsubscribeOnScroll: (() => void)[] = []
-  private dragUnsubscribe: (() => void) | null = null
+  private dragStream: { signal: any; cleanup: () => void } | null = null
+  private scrollStream: { scrollData: any; percentages: any; bounds: any; cleanup: () => void } | null = null
 
   constructor(options: WaveSurferOptions, audioElement?: HTMLElement) {
     super()
@@ -96,16 +99,14 @@ class Renderer extends EventEmitter<RendererEvents> {
       this.initDrag()
     }
 
-    // Add a scroll listener
-    this.scrollContainer.addEventListener('scroll', () => {
-      const { scrollLeft, scrollWidth, clientWidth } = this.scrollContainer
-      const { startX, endX } = utils.calculateScrollPercentages({
-        scrollLeft,
-        scrollWidth,
-        clientWidth,
-      })
-      this.emit('scroll', startX, endX, scrollLeft, scrollLeft + clientWidth)
-    })
+    // Add a scroll listener using reactive stream
+    this.scrollStream = createScrollStream(this.scrollContainer)
+    const unsubscribeScroll = effect(() => {
+      const { startX, endX } = this.scrollStream!.percentages.value
+      const { left, right } = this.scrollStream!.bounds.value
+      this.emit('scroll', startX, endX, left, right)
+    }, [this.scrollStream.percentages, this.scrollStream.bounds])
+    this.subscriptions.push(unsubscribeScroll)
 
     // Re-render the waveform on container resize
     if (typeof ResizeObserver === 'function') {
@@ -129,30 +130,29 @@ class Renderer extends EventEmitter<RendererEvents> {
 
   private initDrag() {
     // Don't initialize drag if it's already set up
-    if (this.dragUnsubscribe) return
+    if (this.dragStream) return
 
-    this.dragUnsubscribe = makeDraggable(
-      this.wrapper,
-      // On drag
-      (_, __, x) => {
-        const width = this.wrapper.getBoundingClientRect().width
-        this.emit('drag', utils.clampToUnit(x / width))
-      },
-      // On start drag
-      (x) => {
+    this.dragStream = createDragStream(this.wrapper)
+
+    const unsubscribeDrag = effect(() => {
+      const drag = this.dragStream!.signal.value
+      if (!drag) return
+
+      const width = this.wrapper.getBoundingClientRect().width
+      const relX = utils.clampToUnit(drag.x / width)
+
+      if (drag.type === 'start') {
         this.isDragging = true
-        const width = this.wrapper.getBoundingClientRect().width
-        this.emit('dragstart', utils.clampToUnit(x / width))
-      },
-      // On end drag
-      (x) => {
+        this.emit('dragstart', relX)
+      } else if (drag.type === 'move') {
+        this.emit('drag', relX)
+      } else if (drag.type === 'end') {
         this.isDragging = false
-        const width = this.wrapper.getBoundingClientRect().width
-        this.emit('dragend', utils.clampToUnit(x / width))
-      },
-    )
+        this.emit('dragend', relX)
+      }
+    }, [this.dragStream.signal])
 
-    this.subscriptions.push(this.dragUnsubscribe)
+    this.subscriptions.push(unsubscribeDrag)
   }
 
   private initHtml(): [HTMLElement, ShadowRoot] {
@@ -290,6 +290,14 @@ class Renderer extends EventEmitter<RendererEvents> {
     }
     this.unsubscribeOnScroll?.forEach((unsubscribe) => unsubscribe())
     this.unsubscribeOnScroll = []
+    if (this.dragStream) {
+      this.dragStream.cleanup()
+      this.dragStream = null
+    }
+    if (this.scrollStream) {
+      this.scrollStream.cleanup()
+      this.scrollStream = null
+    }
   }
 
   private createDelay(delayMs = 10): () => Promise<void> {
@@ -339,8 +347,11 @@ class Renderer extends EventEmitter<RendererEvents> {
     })
   }
 
-  private convertColorValues(color?: WaveSurferOptions['waveColor']): string | CanvasGradient {
-    return utils.resolveColorValue(color, this.getPixelRatio())
+  private convertColorValues(
+    color?: WaveSurferOptions['waveColor'],
+    ctx?: CanvasRenderingContext2D,
+  ): string | CanvasGradient {
+    return utils.resolveColorValue(color, this.getPixelRatio(), ctx?.canvas.height)
   }
 
   private getPixelRatio(): number {
@@ -354,13 +365,15 @@ class Renderer extends EventEmitter<RendererEvents> {
     vScale: number,
   ) {
     const { width, height } = ctx.canvas
-    const { halfHeight, barWidth, barRadius, barIndexScale, barSpacing } = utils.calculateBarRenderConfig({
-      width,
-      height,
-      length: (channelData[0] || []).length,
-      options,
-      pixelRatio: this.getPixelRatio(),
-    })
+    const { halfHeight, barWidth, barRadius, barIndexScale, barSpacing, barMinHeight } = utils.calculateBarRenderConfig(
+      {
+        width,
+        height,
+        length: (channelData[0] || []).length,
+        options,
+        pixelRatio: this.getPixelRatio(),
+      },
+    )
 
     const segments = utils.calculateBarSegments({
       channelData,
@@ -371,6 +384,7 @@ class Renderer extends EventEmitter<RendererEvents> {
       vScale,
       canvasHeight: height,
       barAlign: options.barAlign,
+      barMinHeight,
     })
 
     ctx.beginPath()
@@ -422,7 +436,7 @@ class Renderer extends EventEmitter<RendererEvents> {
   }
 
   private renderWaveform(channelData: ChannelData, options: WaveSurferOptions, ctx: CanvasRenderingContext2D) {
-    ctx.fillStyle = this.convertColorValues(options.waveColor)
+    ctx.fillStyle = this.convertColorValues(options.waveColor, ctx)
 
     if (options.renderFunction) {
       options.renderFunction(channelData, ctx)
@@ -433,6 +447,7 @@ class Renderer extends EventEmitter<RendererEvents> {
       channelData,
       barHeight: options.barHeight,
       normalize: options.normalize,
+      maxPeak: options.maxPeak,
     })
 
     if (utils.shouldRenderBars(options)) {
@@ -464,7 +479,7 @@ class Renderer extends EventEmitter<RendererEvents> {
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D
 
     if (options.renderFunction) {
-      ctx.fillStyle = this.convertColorValues(options.waveColor)
+      ctx.fillStyle = this.convertColorValues(options.waveColor, ctx)
       options.renderFunction(data, ctx)
     } else {
       this.renderWaveform(data, options, ctx)
@@ -477,7 +492,10 @@ class Renderer extends EventEmitter<RendererEvents> {
       progressCtx.drawImage(canvas, 0, 0)
       // Set the composition method to draw only where the waveform is drawn
       progressCtx.globalCompositeOperation = 'source-in'
-      progressCtx.fillStyle = this.convertColorValues(options.progressColor as WaveSurferOptions['waveColor'])
+      progressCtx.fillStyle = this.convertColorValues(
+        options.progressColor as WaveSurferOptions['waveColor'],
+        progressCtx,
+      )
       // This rectangle acts as a mask thanks to the composition method
       progressCtx.fillRect(0, 0, canvas.width, canvas.height)
       progressContainer.appendChild(progressCanvas)
@@ -712,17 +730,6 @@ class Renderer extends EventEmitter<RendererEvents> {
         this.scrollContainer.scrollLeft += center
       }
     }
-
-    // Emit the scroll event
-    {
-      const newScroll = this.scrollContainer.scrollLeft
-      const { startX, endX } = utils.calculateScrollPercentages({
-        scrollLeft: newScroll,
-        scrollWidth,
-        clientWidth,
-      })
-      this.emit('scroll', startX, endX, newScroll, newScroll + clientWidth)
-    }
   }
 
   renderProgress(progress: number, isPlaying?: boolean) {
@@ -735,7 +742,8 @@ class Renderer extends EventEmitter<RendererEvents> {
       ? `translateX(-${progress * this.options.cursorWidth}px)`
       : ''
 
-    if (this.isScrollable && this.options.autoScroll) {
+    // Only scroll if we have valid audio data to prevent race conditions during loading
+    if (this.isScrollable && this.options.autoScroll && this.audioData && this.audioData.duration > 0) {
       this.scrollIntoView(progress, isPlaying)
     }
   }

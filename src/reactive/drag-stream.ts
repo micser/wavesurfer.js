@@ -1,18 +1,59 @@
 /**
- * @deprecated Use createDragStream from './reactive/drag-stream.js' instead.
- * This function is maintained for backward compatibility but will be removed in a future version.
+ * Reactive drag stream utilities
+ *
+ * Provides declarative drag handling using reactive streams.
+ * Automatically handles mouseup cleanup and supports constraints.
  */
-export function makeDraggable(
-  element: HTMLElement | null,
-  onDrag: (dx: number, dy: number, x: number, y: number) => void,
-  onStart?: (x: number, y: number) => void,
-  onEnd?: (x: number, y: number) => void,
-  threshold = 3,
-  mouseButton = 0,
-  touchDelay = 100,
-): () => void {
-  if (!element) return () => void 0
 
+import { signal, type Signal } from './store.js'
+import { cleanup } from './event-streams.js'
+
+export interface DragEvent {
+  type: 'start' | 'move' | 'end'
+  x: number
+  y: number
+  deltaX?: number
+  deltaY?: number
+}
+
+export interface DragStreamOptions {
+  /** Minimum distance to move before dragging starts (default: 3) */
+  threshold?: number
+  /** Mouse button to listen for (default: 0 = left button) */
+  mouseButton?: number
+  /** Delay before touch drag starts in ms (default: 100) */
+  touchDelay?: number
+}
+
+/**
+ * Create a reactive drag stream from an element
+ *
+ * Emits drag events (start, move, end) as the user drags the element.
+ * Automatically handles pointer capture, multi-touch prevention, and cleanup.
+ *
+ * @example
+ * ```typescript
+ * const dragSignal = createDragStream(element)
+ *
+ * effect(() => {
+ *   const drag = dragSignal.value
+ *   if (drag?.type === 'move') {
+ *     console.log('Dragging:', drag.deltaX, drag.deltaY)
+ *   }
+ * }, [dragSignal])
+ * ```
+ *
+ * @param element - Element to make draggable
+ * @param options - Drag configuration options
+ * @returns Signal emitting drag events and cleanup function
+ */
+export function createDragStream(
+  element: HTMLElement,
+  options: DragStreamOptions = {},
+): { signal: Signal<DragEvent | null>; cleanup: () => void } {
+  const { threshold = 3, mouseButton = 0, touchDelay = 100 } = options
+
+  const dragSignal = signal<DragEvent | null>(null)
   const activePointers = new Map<number, PointerEvent>()
   const isTouchDevice = matchMedia('(pointer: coarse)').matches
 
@@ -31,6 +72,9 @@ export function makeDraggable(
     let isDragging = false
     const touchStartTime = Date.now()
 
+    const rect = element.getBoundingClientRect()
+    const { left, top } = rect
+
     const onPointerMove = (event: PointerEvent) => {
       if (event.defaultPrevented || activePointers.size > 1) {
         return
@@ -47,15 +91,24 @@ export function makeDraggable(
         event.preventDefault()
         event.stopPropagation()
 
-        const rect = element.getBoundingClientRect()
-        const { left, top } = rect
-
         if (!isDragging) {
-          onStart?.(startX - left, startY - top)
+          // Emit start event
+          dragSignal.set({
+            type: 'start',
+            x: startX - left,
+            y: startY - top,
+          })
           isDragging = true
         }
 
-        onDrag(dx, dy, x - left, y - top)
+        // Emit move event
+        dragSignal.set({
+          type: 'move',
+          x: x - left,
+          y: y - top,
+          deltaX: dx,
+          deltaY: dy,
+        })
 
         startX = x
         startY = y
@@ -67,10 +120,13 @@ export function makeDraggable(
       if (isDragging) {
         const x = event.clientX
         const y = event.clientY
-        const rect = element.getBoundingClientRect()
-        const { left, top } = rect
 
-        onEnd?.(x - left, y - top)
+        // Emit end event
+        dragSignal.set({
+          type: 'end',
+          x: x - left,
+          y: y - top,
+        })
       }
       unsubscribeDocument()
     }
@@ -119,9 +175,15 @@ export function makeDraggable(
 
   element.addEventListener('pointerdown', onPointerDown)
 
-  return () => {
+  const cleanupFn = () => {
     unsubscribeDocument()
     element.removeEventListener('pointerdown', onPointerDown)
     activePointers.clear()
+    cleanup(dragSignal)
+  }
+
+  return {
+    signal: dragSignal,
+    cleanup: cleanupFn,
   }
 }

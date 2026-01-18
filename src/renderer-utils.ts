@@ -40,6 +40,7 @@ export function calculateBarRenderConfig({
   const barWidth = options.barWidth ? options.barWidth * pixelRatio : 1
   const barGap = options.barGap ? options.barGap * pixelRatio : options.barWidth ? barWidth / 2 : 0
   const barRadius = options.barRadius || 0
+  const barMinHeight = options.barMinHeight ? options.barMinHeight * pixelRatio : 0
   const spacing = barWidth + barGap || 1
   const barIndexScale = length > 0 ? width / spacing / length : 0
 
@@ -48,6 +49,7 @@ export function calculateBarRenderConfig({
     barWidth,
     barGap,
     barRadius,
+    barMinHeight,
     barIndexScale,
     barSpacing: spacing,
   }
@@ -58,15 +60,26 @@ export function calculateBarHeights({
   maxBottom,
   halfHeight,
   vScale,
+  barMinHeight = 0,
+  barAlign,
 }: {
   maxTop: number
   maxBottom: number
   halfHeight: number
   vScale: number
+  barMinHeight?: number
+  barAlign?: WaveSurferOptions['barAlign']
 }): { topHeight: number; totalHeight: number } {
-  const topHeight = Math.round(maxTop * halfHeight * vScale)
+  let topHeight = Math.round(maxTop * halfHeight * vScale)
   const bottomHeight = Math.round(maxBottom * halfHeight * vScale)
-  const totalHeight = topHeight + bottomHeight || 1
+  let totalHeight = topHeight + bottomHeight || 1
+
+  if (totalHeight < barMinHeight) {
+    totalHeight = barMinHeight
+    if (!barAlign) {
+      topHeight = totalHeight / 2
+    }
+  }
 
   return { topHeight, totalHeight }
 }
@@ -98,6 +111,7 @@ export function calculateBarSegments({
   vScale,
   canvasHeight,
   barAlign,
+  barMinHeight,
 }: {
   channelData: ChannelData
   barIndexScale: number
@@ -107,6 +121,7 @@ export function calculateBarSegments({
   vScale: number
   canvasHeight: number
   barAlign: WaveSurferOptions['barAlign']
+  barMinHeight: number
 }): BarSegment[] {
   const topChannel = channelData[0] || []
   const bottomChannel = channelData[1] || topChannel
@@ -127,6 +142,8 @@ export function calculateBarSegments({
         maxBottom,
         halfHeight,
         vScale,
+        barMinHeight,
+        barAlign,
       })
 
       const y = resolveBarYPosition({
@@ -203,6 +220,7 @@ export function shouldRenderBars(options: WaveSurferOptions): boolean {
 export function resolveColorValue(
   color: WaveSurferOptions['waveColor'],
   devicePixelRatio: number,
+  canvasHeight?: number,
 ): string | CanvasGradient {
   if (!Array.isArray(color)) return color || ''
   if (color.length === 0) return '#999'
@@ -210,7 +228,7 @@ export function resolveColorValue(
 
   const canvasElement = document.createElement('canvas')
   const ctx = canvasElement.getContext('2d') as CanvasRenderingContext2D
-  const gradientHeight = canvasElement.height * devicePixelRatio
+  const gradientHeight = canvasHeight ?? canvasElement.height * devicePixelRatio
   const gradient = ctx.createLinearGradient(0, 0, 0, gradientHeight || devicePixelRatio)
 
   const colorStopPercentage = 1 / (color.length - 1)
@@ -310,10 +328,12 @@ export function calculateVerticalScale({
   channelData,
   barHeight,
   normalize,
+  maxPeak,
 }: {
   channelData: ChannelData
   barHeight?: WaveSurferOptions['barHeight']
   normalize?: WaveSurferOptions['normalize']
+  maxPeak?: WaveSurferOptions['maxPeak']
 }): number {
   const baseScale = barHeight || 1
   if (!normalize) return baseScale
@@ -321,11 +341,14 @@ export function calculateVerticalScale({
   const firstChannel = channelData[0]
   if (!firstChannel || firstChannel.length === 0) return baseScale
 
-  let max = 0
-  for (let i = 0; i < firstChannel.length; i++) {
-    const value = firstChannel[i] ?? 0
-    const magnitude = Math.abs(value)
-    if (magnitude > max) max = magnitude
+  // Use fixed max peak if provided, otherwise calculate from data
+  let max = maxPeak ?? 0
+  if (!maxPeak) {
+    for (let i = 0; i < firstChannel.length; i++) {
+      const value = firstChannel[i] ?? 0
+      const magnitude = Math.abs(value)
+      if (magnitude > max) max = magnitude
+    }
   }
 
   if (!max) return baseScale
@@ -379,6 +402,10 @@ export function calculateLinePaths({
   })
 }
 
+/**
+ * @deprecated Use calculateScrollPercentages from './reactive/scroll-stream.js' instead.
+ * This function is maintained for backward compatibility but will be removed in a future version.
+ */
 export function calculateScrollPercentages({
   scrollLeft,
   clientWidth,
@@ -389,13 +416,16 @@ export function calculateScrollPercentages({
   scrollWidth: number
 }): { startX: number; endX: number } {
   if (scrollWidth === 0) {
-    return { startX: 0, endX: 0 }
+    return { startX: 0, endX: 1 }
   }
 
   const startX = scrollLeft / scrollWidth
   const endX = (scrollLeft + clientWidth) / scrollWidth
 
-  return { startX, endX }
+  return {
+    startX: Math.max(0, Math.min(1, startX)),
+    endX: Math.max(0, Math.min(1, endX)),
+  }
 }
 
 export function roundToHalfAwayFromZero(value: number): number {
