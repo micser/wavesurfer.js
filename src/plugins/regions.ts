@@ -43,6 +43,8 @@ export type RegionEvents = {
   update: [side?: UpdateSide]
   /** When dragging or resizing is finished */
   'update-end': [side?: UpdateSide]
+  /** When the region needs to be re-rendered */
+  render: []
   /** On play */
   play: [end?: number]
   /** On mouse click */
@@ -103,7 +105,7 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
   public contentEditable = false
   public subscriptions: (() => void)[] = []
   public updatingSide?: UpdateSide = undefined
-  private isRemoved = false
+  public isRemoved = false
   private contentClickListener?: (e: MouseEvent) => void
   private contentBlurListener?: () => void
 
@@ -492,6 +494,7 @@ class SingleRegion extends EventEmitter<RegionEvents> implements Region {
       this.end = this.clampPosition(options.end ?? (isMarker ? this.start : this.end))
       this.renderPosition()
       this.setPart()
+      this.emit('render')
     }
 
     if (options.content) {
@@ -634,21 +637,27 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
   }
 
   private avoidOverlapping(region: Region) {
-    if (!region.content) return
+    if (!region.content || region.isRemoved) return
 
     setTimeout(() => {
       // Check that the label doesn't overlap with other labels
       // If it does, push it down until it doesn't
+      // only check regions that are before us in the list -- otherwise
+      // both overlapping regions will try to move down away from each other.
       const div = region.content as HTMLElement
       const box = div.getBoundingClientRect()
 
+      const regionIndex = this.regions.indexOf(region)
+
       const overlap = this.regions
+        .slice(0, regionIndex)
+        .filter((reg) => !reg.isRemoved)
         .map((reg) => {
           if (reg === region || !reg.content) return 0
 
           const otherBox = reg.content.getBoundingClientRect()
           if (box.left < otherBox.left + otherBox.width && otherBox.left < box.left + box.width) {
-            return otherBox.height
+            return otherBox.height + 2
           }
           return 0
         })
@@ -703,15 +712,17 @@ class RegionsPlugin extends BasePlugin<RegionsPluginEvents, RegionsPluginOptions
       const unsubscribeScroll = this.wavesurfer.on('scroll', renderIfVisible)
       const unsubscribeZoom = this.wavesurfer.on('zoom', renderIfVisible)
       const unsubscribeResize = this.wavesurfer.on('resize', renderIfVisible)
+      const unsubscribeRender = region.on('render', renderIfVisible)
 
       // Only push the unsubscribe functions, not the once() return values
-      this.subscriptions.push(unsubscribeScroll, unsubscribeZoom, unsubscribeResize)
+      this.subscriptions.push(unsubscribeScroll, unsubscribeZoom, unsubscribeResize, unsubscribeRender)
 
       // Clean up subscriptions when region is removed
       region.once('remove', () => {
         unsubscribeScroll()
         unsubscribeZoom()
         unsubscribeResize()
+        unsubscribeRender()
       })
     }, 0)
   }
