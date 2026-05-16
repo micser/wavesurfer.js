@@ -12,6 +12,17 @@ type WebAudioPlayerEvents = {
   ended: []
 }
 
+function setWebAudioSessionPlayback() {
+  const navigator = globalThis.navigator as (Navigator & { audioSession?: { type: string } }) | undefined
+  if (!navigator?.audioSession) return
+
+  try {
+    navigator.audioSession.type = 'playback'
+  } catch (e) {
+    console.warn('Setting navigator.audioSession.type failed:', e)
+  }
+}
+
 /**
  * A Web Audio buffer player emulating the behavior of an HTML5 Audio element.
  *
@@ -35,9 +46,10 @@ class WebAudioPlayer extends EventEmitter<WebAudioPlayerEvents> {
   public seeking = false
   public autoplay = false
 
-  constructor(audioContext = new AudioContext()) {
+  constructor(audioContext?: AudioContext) {
     super()
-    this.audioContext = audioContext
+    setWebAudioSessionPlayback()
+    this.audioContext = audioContext || new AudioContext()
     this.gainNode = this.audioContext.createGain()
     this.gainNode.connect(this.audioContext.destination)
   }
@@ -120,7 +132,7 @@ class WebAudioPlayer extends EventEmitter<WebAudioPlayerEvents> {
     this.playStartTime = this.audioContext.currentTime
 
     this.bufferNode.onended = () => {
-      if (this.currentTime >= this.duration) {
+      if (!this.paused && this.duration - this.currentTime < 0.01) {
         this.pause()
         this.emit('ended')
       }
