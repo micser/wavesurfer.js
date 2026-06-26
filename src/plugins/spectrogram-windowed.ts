@@ -8,7 +8,7 @@
 // @ts-nocheck
 
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
-import createElement from '../dom.js'
+import createElement, { isHTMLElement } from '../dom.js'
 // Import centralized FFT functionality
 import FFT, {
   hzToScale,
@@ -246,7 +246,7 @@ class WindowedSpectrogramPlugin extends BasePlugin<WindowedSpectrogramPluginEven
         if (el instanceof HTMLElement) {
           this.container = el
         }
-      } else if (this.options.container instanceof HTMLElement) {
+      } else if (isHTMLElement(this.options.container)) {
         this.container = this.options.container
       }
     }
@@ -965,6 +965,11 @@ class WindowedSpectrogramPlugin extends BasePlugin<WindowedSpectrogramPluginEven
       )
     }
 
+    // Remove old canvas if this segment was previously rendered
+    if (segment.canvas) {
+      segment.canvas.remove()
+    }
+
     // Add canvas to container
     segment.canvas = canvas
     this.canvasContainer.appendChild(canvas)
@@ -1086,14 +1091,13 @@ class WindowedSpectrogramPlugin extends BasePlugin<WindowedSpectrogramPluginEven
 
     // prepare canvas element for labels
     const ctx = this.labelsEl.getContext('2d')
+    if (!ctx) {
+      return
+    }
     const dispScale = window.devicePixelRatio
     this.labelsEl.height = this.height * channels * dispScale
     this.labelsEl.width = bgWidth * dispScale
     ctx.scale(dispScale, dispScale)
-
-    if (!ctx) {
-      return
-    }
 
     for (let c = 0; c < channels; c++) {
       // for each channel

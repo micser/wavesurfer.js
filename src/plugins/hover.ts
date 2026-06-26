@@ -4,7 +4,7 @@
 
 import BasePlugin, { type BasePluginEvents } from '../base-plugin.js'
 import createElement from '../dom.js'
-import { fromEvent } from '../reactive/event-streams.js'
+import { cleanup, fromEvent } from '../reactive/event-streams.js'
 import { effect } from '../reactive/store.js'
 
 export type HoverPluginOptions = {
@@ -55,6 +55,8 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
   private wrapper: HTMLElement
   private label: HTMLElement
   private lastPointerPosition: { clientX: number; clientY: number } | null = null
+  private isPointerOverWaveform = false
+  private streamCleanups: Array<() => void> = []
 
   constructor(options?: HoverPluginOptions) {
     super(options || {})
@@ -113,15 +115,32 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
     // Get reactive state
     const state = this.wavesurfer.getState()
 
+    // Clean up old event streams (from re-initialization)
+    this.streamCleanups.forEach((fn) => fn())
+    this.streamCleanups = []
+
     // Create event streams for pointer events
     const pointerMove = fromEvent(container, 'pointermove')
     const pointerLeave = fromEvent(container, 'pointerleave')
+    this.streamCleanups.push(
+      () => cleanup(pointerMove),
+      () => cleanup(pointerLeave),
+    )
+
+    this.subscriptions.push(
+      effect(() => {
+        const e = pointerMove.value
+        if (!e) return
+
+        this.isPointerOverWaveform = true
+      }, [pointerMove]),
+    )
 
     // React to pointer movement
     this.subscriptions.push(
       effect(() => {
         const e = pointerMove.value
-        if (!e || !this.wavesurfer) return
+        if (!e || !this.wavesurfer || !this.isPointerOverWaveform) return
 
         // Store only the position data needed for zoom/scroll updates
         this.lastPointerPosition = { clientX: e.clientX, clientY: e.clientY }
@@ -154,10 +173,20 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
         if (!e) return
 
         this.wrapper.style.opacity = '0'
+        this.isPointerOverWaveform = false
         this.lastPointerPosition = null
-        // reset transform so the hover element doesn't extend the scrollable overflow area
-        // of the scroll container, which would prevent proper scrollLeft clamping on zoom changes
-        this.wrapper.style.transform = ''
+        // Reset transform after the opacity fade so the line doesn't jump to position 0
+        // while still visible. Also resets the scrollable overflow area of the scroll
+        // container to prevent improper scrollLeft clamping on zoom changes.
+        this.wrapper.addEventListener(
+          'transitionend',
+          () => {
+            if (!this.isPointerOverWaveform) {
+              this.wrapper.style.transform = ''
+            }
+          },
+          { once: true },
+        )
       }, [pointerLeave]),
     )
 
@@ -188,6 +217,8 @@ class HoverPlugin extends BasePlugin<HoverPluginEvents, HoverPluginOptions> {
 
   /** Unmount */
   public destroy() {
+    this.streamCleanups.forEach((fn) => fn())
+    this.streamCleanups = []
     super.destroy()
     this.wrapper.remove()
   }
